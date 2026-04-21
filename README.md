@@ -30,26 +30,20 @@ A two-stage optimization first reconstructs visible areas, then fills in missing
 
 Tested on Ubuntu with NVIDIA 2080 Ti (CUDA 11.8) and Python 3.10.
 
-### 1. Create environment with uv
+### 1. Create environment
 
 ```bash
 # Install uv if you don't have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create environment and install dependencies
+# Create virtual environment and install PyTorch + dependencies
 uv venv --python 3.10
 source .venv/bin/activate
-uv pip install -e .
+uv pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu118
+uv pip install -r requirements.txt --no-build-isolation
 ```
 
-### 2. Install CUDA extensions
-
-```bash
-pip install submodules/diff-gaussian-rasterization
-pip install submodules/simple-knn
-```
-
-### 3. Download pre-trained models
+### 2. Download pre-trained models
 
 ```bash
 python download_hf_models.py
