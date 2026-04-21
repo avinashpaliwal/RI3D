@@ -190,8 +190,9 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         if not skip_train:
             bg_train = render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, not_generate_video=extra_opts.not_generate_video, save_images=not extra_opts.not_saveimages, viewR=scene.getRenderCameras()[0])
         # bg_train = background
+        test_bg = bg_train if bg_train is not None else background
         if not skip_test and len(scene.getTestCameras()) > 0:
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, not_generate_video=extra_opts.not_generate_video, save_images=not extra_opts.not_saveimages, viewR=scene.getRenderCameras()[0])
+            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, test_bg, not_generate_video=extra_opts.not_generate_video, save_images=not extra_opts.not_saveimages, viewR=scene.getRenderCameras()[0])
     
     return bg_train
         # if not skip_all:
@@ -265,6 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_mask", default=True, help="Use masked image, by default True")
     parser.add_argument("--transform_the_world", action="store_true", help="Transform the world to the origin")
     parser.add_argument("--load_ply", default="origin", type=str, help="Load other ply as init")
+    parser.add_argument("--postfix", default="_stage1", type=str, help="Postfix for output directory (e.g. _stage1 for repair, _stage2 for inpainting)")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
     lpips_fn = lpips.LPIPS(net='vgg').cuda()
@@ -273,7 +275,7 @@ if __name__ == "__main__":
 
     args.is_renderrr = True
 
-    postfix = '_den'
+    postfix = args.postfix if hasattr(args, 'postfix') else '_den'
 
     # sometimes we only want to render the images, and do not want to evaluate the metrics
     if args.is_eval:
@@ -282,6 +284,9 @@ if __name__ == "__main__":
         exit()
 
     bg = None
+
+    if not args.render_path:
+        bg = render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.skip_all, extra_opts=args)
 
     if args.render_path:
         render_path(model.extract(args), args.iteration, pipeline.extract(args), extra_opts = args, bg=bg)

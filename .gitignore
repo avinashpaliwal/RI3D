@@ -31,7 +31,12 @@ models/*.safetensors
 # Development artifacts
 zip_output/
 *.zip
+*.tar.gz
 depth.ipynb
+
+# Data and pretrained models (download separately)
+data/
+pretrained/
 
 # uv / venv
 .venv/
