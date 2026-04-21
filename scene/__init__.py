@@ -48,7 +48,6 @@ class Scene:
         # exit()
 
         if os.path.exists(os.path.join(args.source_path, "transforms.json")): # type: ignore
-            # pcd_init = self.gaussians.load_init_ply(f'/home/grads/a/avinashpaliwal/github/GaussianObject/debug/gs_init/{args.source_path.split("/")[-1]}_{extra_opts.sparse_view_num}/point_cloud/iteration_1/point_cloud.ply')
             pcd_init = None
             scene_info, flows = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, extra_opts=extra_opts, ply_init=pcd_init) # type: ignore
         elif os.path.exists(os.path.join(args.source_path, "transforms_alignz_train.json")): # type: ignore

@@ -1,28 +1,12 @@
+#!/bin/bash
+# Usage: bash run.sh <scene> <num_views>
+# Example: bash run.sh bicycle 3
+# Uncomment stages as needed to run the full pipeline.
+
 DATASET="data/mipnerf360"
-# DATASET="/home/grads/a/avinashpaliwal/github/dust3r/co3d"
-# NUM_VIEW=3
 NUM_VIEW=$2
 
-
-# system.init_dreamer="output/gs_init/${1}_$NUM_VIEW" \
-
-# python gaussian_object_system.py \
-# --config configs/gaussian-object.yaml \
-# --train --gpu 0 \
-# tag="${1}_$NUM_VIEW" \
-# exp_root_dir="output_den$NUM_VIEW" \
-# system.exp_name="output/controlnet_finetune/${1}_$NUM_VIEW" \
-# system.init_dreamer="output_den$NUM_VIEW/gaussian_object/${1}_$NUM_VIEW" \
-# system.refresh_size=8 \
-# data.data_dir="$DATASET/$1" \
-# data.resolution=4 \
-# data.sparse_num=$NUM_VIEW \
-# data.prompt="a photo" \
-# data.refresh_size=8 \
-# data.refresh_interval=1 \
-# data.around_gt_steps=40 \
-# system.sh_degree=2
-
+# Stage 1: Gaussian Initialization
 # python train_gs_init.py -s $DATASET/$1 \
 #     -m debug/gs_init/$1\_$NUM_VIEW \
 #     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
@@ -34,6 +18,7 @@ NUM_VIEW=$2
 #     --white_background --random_background \
 #     --ply_path debug/gs_init/${1}_$NUM_VIEW/point_cloud/iteration_1/point_cloud.ply
 
+# Stage 2: Leave-One-Out Data Generation
 # python -W ignore leave_one_out_stage1.py -s $DATASET/$1 \
 #     -m output/gs_init/$1\_loo\_$NUM_VIEW \
 #     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
@@ -46,6 +31,7 @@ NUM_VIEW=$2
 #     --white_background --random_background \
 #     --ply_path debug/gs_init/${1}_$NUM_VIEW/point_cloud/iteration_1/point_cloud.ply
 
+# Stage 3: LoRA Fine-tuning (Repair Model)
 # python train_lora.py --exp_name controlnet_finetune/$1\_$NUM_VIEW \
 # --prompt xxy5syt00 --sh_degree 2 --resolution 4 --sparse_num $NUM_VIEW \
 # --data_dir $DATASET/$1 \
@@ -54,15 +40,12 @@ NUM_VIEW=$2
 # --bg_white --sd_locked --train_lora \
 # --add_diffusion_lora --add_control_lora --add_clip_lora
 
-# # conda activate realfill
+# Stage 4: Inpainting Model Fine-tuning (RealFill)
 # MODEL_NAME="stabilityai/stable-diffusion-2-inpainting"
-# # TRAIN_DIR="/home/grads/a/avinashpaliwal/github/GaussianObject/data/mipnerf360_512"
-# # OUTPUT_DIR="$1-model"
-
-# python /home/grads/a/avinashpaliwal/github/realfill/train_realfill.py \
+# python train_realfill.py \
 #   --pretrained_model_name_or_path=$MODEL_NAME \
 #   --train_data_dir="$DATASET/$1/$NUM_VIEW" \
-#   --output_dir="/data1/avinash/gausobj/inpainting/${1}_$NUM_VIEW" \
+#   --output_dir="inpainting/${1}_$NUM_VIEW" \
 #   --resolution=512 \
 #   --train_batch_size=16 \
 #   --gradient_accumulation_steps=1 \
@@ -73,13 +56,10 @@ NUM_VIEW=$2
 #   --max_train_steps=2000 \
 #   --lora_rank=8 \
 #   --lora_dropout=0.1 \
-#   --lora_alpha=16 \
+#   --lora_alpha=16
 
-# # conda deactivate
-
-
+# Stage 5a: Repair (Densification)
 # mkdir -p output_den$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/
-
 # python -W ignore train_repair.py \
 # --config configs/gaussian-object.yaml \
 # --train --gpu 0 \
@@ -95,7 +75,7 @@ NUM_VIEW=$2
 # data.refresh_size=8 \
 # system.sh_degree=2 2>&1 | tee output_den$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/output.log
 
-
+# Stage 5b: Inpainting Refinement
 mkdir -p output_inp$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/
 
 python -W ignore train_repair.py \

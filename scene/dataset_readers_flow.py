@@ -397,8 +397,6 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
 
         # storePly(ply_path, xyz, rgb, radii2)
         storePly(ply_path, xyz, rgb)
-        # ply_path = '/home/grads/a/avinashpaliwal/github/GaussianObject/output/gs_init/bonsai_3/point_cloud/point_cloudnnn.ply'
-        # radii2 = None
         try:
             pcd = fetchPly(ply_path)
         except:
@@ -409,14 +407,6 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
         ply_path = None
         radii2 = None
 
-    
-    # ply_path = '/home/grads/a/avinashpaliwal/github/GaussianObject/output/gs_init/bonsai_3/point_cloud/point_cloudnnn.ply'
-    # radii2 = None
-    # try:
-    #     pcd = fetchPly(ply_path)
-    # except:
-    #     pcd = None
-    # # exit()
     print(f"PCD {pcd == None} {path}")
     
 
