@@ -1,3 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.so
 
-assets/.DS_Store
+# macOS
 .DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Training outputs
+output*/
+debug*/
+checkpoints/
+
+# Model weights (download separately)
+models/*.ckpt
+models/*.pth
+models/*.safetensors
+
+# Intermediate data
+*.npy
+*.pkl
+!data/**/*.json
+
+# Development artifacts
+zip_output/
+*.zip
+depth.ipynb
+
+# uv / venv
+.venv/
+.python-version

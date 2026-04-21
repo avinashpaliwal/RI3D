@@ -1,0 +1,60 @@
+[project]
+name = "ri3d"
+version = "0.1.0"
+description = "RI3D: Few-Shot Gaussian Splatting With Repair and Inpainting Diffusion Priors"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Avinash Paliwal" },
+]
+
+dependencies = [
+    "torch==2.1.0",
+    "torchvision==0.16.0",
+    "pytorch-lightning==2.1.0",
+    "lightning-utilities",
+    "diffusers>=0.24.0",
+    "transformers>=4.35.0",
+    "safetensors",
+    "huggingface-hub",
+    "omegaconf>=2.3.0",
+    "einops>=0.7.0",
+    "open3d>=0.17.0",
+    "opencv-python>=4.8.0",
+    "plyfile>=1.0",
+    "lpips>=0.1.4",
+    "torchmetrics>=1.2.0",
+    "kornia",
+    "scipy",
+    "scikit-learn",
+    "minlora",
+    "ropwr",
+    "camtools>=0.1.4",
+    "jaxtyping",
+    "open-clip-torch>=2.23.0",
+    "clip @ git+https://github.com/openai/CLIP.git",
+    "imageio>=2.31.0",
+    "imageio-ffmpeg",
+    "matplotlib",
+    "tqdm",
+    "pyyaml",
+    "tensorboard>=2.15.0",
+]
+
+[project.urls]
+Homepage = "https://people.engr.tamu.edu/nimak/Papers/RI3D/index.html"
+Repository = "https://github.com/avinashpaliwal/RI3D"
+Paper = "https://arxiv.org/abs/2503.10860"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[tool.uv]
+find-links = [
+    "https://download.pytorch.org/whl/cu118",
+]
+
+[tool.setuptools]
+packages = []
