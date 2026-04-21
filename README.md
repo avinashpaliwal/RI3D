@@ -164,10 +164,20 @@ python train_repair.py \
 
 ### Evaluation
 
+Render novel view videos from a trained model:
+
 ```bash
-python render.py -m output_inp${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW} \
-    --sparse_view_num $NUM_VIEW --skip_all \
-    --render_path
+python render.py \
+    -m output/gs_init/${SCENE}_${NUM_VIEW} \
+    --sparse_view_num $NUM_VIEW --sh_degree 2 \
+    --white_background --render_path \
+    --load_ply output_den${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}/save/last.ply
+```
+
+Or use the convenience script:
+
+```bash
+bash eval.sh $SCENE $NUM_VIEW
 ```
 
 See `run.sh` and `run_parallel_mip.py` for running the full pipeline across all scenes.
