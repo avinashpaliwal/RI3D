@@ -158,20 +158,41 @@ python train_repair.py \
 
 ### Evaluation
 
-Render novel view videos from a trained model:
+#### Pretrained Models
+
+Download pretrained Gaussian Splatting models (mip-NeRF 360, all 9 scenes):
+
+| Views | Link | Size |
+|-------|------|------|
+| 3 | [Google Drive](https://drive.google.com/open?id=1j3T6DuuMU5o7qt3UpWkd9TLJgSbYYi1z) | 6.4 GB |
+| 6 | [Google Drive](https://drive.google.com/open?id=1M981nzmCoWS_5tf4sK3hnHr2ZPb4-K3D) | 6.1 GB |
+| 9 | [Google Drive](https://drive.google.com/open?id=12ZIZEDyiqd21ZnYLw7BPaoUzzPy9LH-B) | 5.1 GB |
+
+Each archive contains `stage1.ply` (repair) and `stage2.ply` (repair + inpainting) per scene. Extract to the project root:
+
+```bash
+tar -xzf ri3d_mipnerf360_3views.tar.gz
+```
+
+#### Render Videos
+
+```bash
+# Render novel view video (stage 1 = repair, stage 2 = inpainting)
+bash eval.sh $SCENE $NUM_VIEW $STAGE
+
+# Example: bicycle, 3 views, final (stage 2) result
+bash eval.sh bicycle 3 2
+```
+
+#### Compute Metrics
 
 ```bash
 python render.py \
     -m output/gs_init/${SCENE}_${NUM_VIEW} \
     --sparse_view_num $NUM_VIEW --sh_degree 2 \
-    --white_background --render_path \
-    --load_ply output_den${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}/save/last.ply
-```
-
-Or use the convenience script:
-
-```bash
-bash eval.sh $SCENE $NUM_VIEW
+    --white_background \
+    --postfix _stage2 \
+    --load_ply ${NUM_VIEW}_views/${SCENE}/stage2.ply
 ```
 
 See `run.sh` and `run_parallel_mip.py` for running the full pipeline across all scenes.
