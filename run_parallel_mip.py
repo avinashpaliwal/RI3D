@@ -7,8 +7,6 @@ gpus = [0, 1, 2, 3, 4, 5, 6, 7]
 gpus = [str(gpu) for gpu in gpus]
 # gpus = ['0, 1', '2, 3', '4, 5', '6, 7']
 
-path = "data/mipnerf360"
-
 scenes = ['bicycle', 'kitchen', 'treehill', 'flowers', 'garden', 'bonsai', 'stump', 'room', 'counter']
 
 n_views = [3] * len(scenes)

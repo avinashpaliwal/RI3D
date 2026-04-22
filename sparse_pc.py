@@ -164,21 +164,13 @@ def pipeline(scene, base_path, n_views):
     if n_views > 0:
         idx_sub = [round_python3(i) for i in np.linspace(0, len(train_img_list)-1, n_views)]
         train_img_list = [c for idx, c in enumerate(train_img_list) if idx in idx_sub]
-        # print(train_img_list)
-        # return
 
-        
+    # Alternative: load view indices from a file instead of uniform sampling
     # train_img_list = [c for idx, c in enumerate(img_list)]
     # if n_views > 0:
-    #     # idx_sub = [round_python3(i) for i in np.linspace(0, len(train_img_list)-1, n_views)]
-    #     # print(os.dir('.'))
     #     assert osp.exists(f"../sparse_{str(n_views)}.txt"), f"sparse_{str(n_views)}.txt not found!"
     #     ids = np.loadtxt(f"../sparse_{n_views}.txt", dtype=np.int32)
-    #     # train_img_list = [c for idx, c in enumerate(train_img_list) if idx in ids]
     #     train_img_list = [train_img_list[i] for i in ids]
-    #     # print(train_img_list)
-    #     # exit()
-
 
     for img_name in train_img_list:
         os.system('cp ../images/' + img_name + '  images/' + img_name)
@@ -205,8 +197,14 @@ def pipeline(scene, base_path, n_views):
     os.system('colmap patch_match_stereo --workspace_path dense')
     os.system('colmap stereo_fusion --workspace_path dense --output_path dense/fused.ply')
 
-for view in [6, 9]:
-    # for scene in ['garden', 'bonsai', 'kitchen']:
-    for scene in ['bicycle', 'counter', 'room', 'stump']:
-        pipeline(scene, base_path = 'data/mipnerf360/', n_views = view)
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--scenes', nargs='+', default=['bicycle', 'kitchen', 'treehill', 'flowers', 'garden', 'bonsai', 'stump', 'room', 'counter'])
+    parser.add_argument('--views', nargs='+', type=int, default=[3, 6, 9])
+    parser.add_argument('--base_path', type=str, default='data/mipnerf360/')
+    args = parser.parse_args()
+    for view in args.views:
+        for scene in args.scenes:
+            pipeline(scene, base_path=args.base_path, n_views=view)
 

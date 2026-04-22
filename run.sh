@@ -76,19 +76,19 @@ NUM_VIEW=$2
 # system.sh_degree=2 2>&1 | tee output_den$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/output.log
 
 # Stage 5b: Inpainting Refinement
-mkdir -p output_inp$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/
-
-python -W ignore train_repair.py \
---config configs/gaussian-object_inp.yaml \
---train --gpu 0 \
-tag="${1}_$NUM_VIEW" \
-exp_root_dir="output_inp$NUM_VIEW" \
-system.init_dreamer="output_den$NUM_VIEW/gaussian_object/${1}_$NUM_VIEW" \
-system.exp_name="output/controlnet_finetune/${1}_$NUM_VIEW" \
-system.refresh_size=10 \
-data.data_dir="$DATASET/$1" \
-data.resolution=4 \
-data.sparse_num=$NUM_VIEW \
-data.prompt="a photo of a xxy5syt00" \
-data.refresh_size=10 \
-system.sh_degree=2  2>&1 | tee output_inp$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/output.log
+# mkdir -p output_inp$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/
+#
+# python -W ignore train_repair.py \
+# --config configs/gaussian-object_inp.yaml \
+# --train --gpu 0 \
+# tag="${1}_$NUM_VIEW" \
+# exp_root_dir="output_inp$NUM_VIEW" \
+# system.init_dreamer="output_den$NUM_VIEW/gaussian_object/${1}_$NUM_VIEW" \
+# system.exp_name="output/controlnet_finetune/${1}_$NUM_VIEW" \
+# system.refresh_size=10 \
+# data.data_dir="$DATASET/$1" \
+# data.resolution=4 \
+# data.sparse_num=$NUM_VIEW \
+# data.prompt="a photo of a xxy5syt00" \
+# data.refresh_size=10 \
+# system.sh_degree=2  2>&1 | tee output_inp$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/output.log
