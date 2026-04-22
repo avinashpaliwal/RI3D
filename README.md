@@ -49,7 +49,7 @@ uv pip install -r requirements.txt --no-build-isolation
 python download_hf_models.py
 ```
 
-This downloads Stable Diffusion v1.5 and ControlNet Tile to `models/`.
+This downloads Stable Diffusion v1.5, ControlNet Tile, and SD2 Inpainting to `models/`.
 
 ## Dataset
 
@@ -155,7 +155,7 @@ We use [RealFill](https://github.com/thuanz123/realfill) to fine-tune a Stable D
 
 ```bash
 python train_realfill.py \
-    --pretrained_model_name_or_path=stabilityai/stable-diffusion-2-inpainting \
+    --pretrained_model_name_or_path=models/stable-diffusion-2-inpainting \
     --train_data_dir=data/mipnerf360/$SCENE/$NUM_VIEW \
     --output_dir=inpainting/${SCENE}_${NUM_VIEW} \
     --resolution=512 --train_batch_size=16 \

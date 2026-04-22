@@ -15,7 +15,7 @@ class InPaint():
 
         # create & load model
         self.pipe = StableDiffusionInpaintPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-2-inpainting",
+            "models/stable-diffusion-2-inpainting",
             torch_dtype=torch.float32,
             revision=None
         )

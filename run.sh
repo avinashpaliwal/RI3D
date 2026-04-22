@@ -41,7 +41,7 @@ NUM_VIEW=$2
 # --add_diffusion_lora --add_control_lora --add_clip_lora
 
 # Stage 4: Inpainting Model Fine-tuning (RealFill)
-# MODEL_NAME="stabilityai/stable-diffusion-2-inpainting"
+# MODEL_NAME="models/stable-diffusion-2-inpainting"
 # python train_realfill.py \
 #   --pretrained_model_name_or_path=$MODEL_NAME \
 #   --train_data_dir="$DATASET/$1/$NUM_VIEW" \

@@ -266,6 +266,7 @@ class GaussianDreamer(BaseLift3DSystem):
         controlnet_num_samples: int = 1
         sh_degree: int = 2
         inpainting_dir: str = "inpainting"
+        enable_inpainting: bool = True
 
         ctrl_steps: int = 1000
         ctrl_loss_ratio_begin: float = 1.0
@@ -273,7 +274,7 @@ class GaussianDreamer(BaseLift3DSystem):
 
     cfg: Config
     def configure(self) -> None:
-        self.gaussian = GaussianModel(sh_degree = self.cfg.sh_degree, device="cuda:1")
+        self.gaussian = GaussianModel(sh_degree = self.cfg.sh_degree, device="cuda")
         # self.gaussian_ref = GaussianModel(sh_degree = self.cfg.sh_degree)
         self.cameras_extent = self.cfg.scene_extent
         # self.bg_color = [1, 0, 1]#[1, 1, 1] if True else [0, 0, 0]
@@ -287,14 +288,14 @@ class GaussianDreamer(BaseLift3DSystem):
         self.bg_color = [0, 0, 0]#bg_color_dict[scene]
         self.background_tensor = None#torch.tensor(self.bg_color, dtype=torch.float32, device="cuda")
 
-        self.enable_inpainting = True
-        
+        self.enable_inpainting = self.cfg.enable_inpainting
+
         if self.enable_inpainting:
             self.inpainter = InPaint(os.path.join(self.cfg.inpainting_dir, f'{scene}_{num_view}'))
 
         # metrics
-        self.psnr = PSNR().to(self.gaussian.device)
-        self.ssim = SSIM().to(self.gaussian.device)
+        self.psnr = PSNR(data_range=1.0).to(self.gaussian.device)
+        self.ssim = SSIM(data_range=1.0).to(self.gaussian.device)
         # self.lpips = LPIPS('vgg').to(self.gaussian.device)
         self.lpips_loss = LPIPS('vgg').to(self.gaussian.device)
         # print(self.lpips_loss.device)
