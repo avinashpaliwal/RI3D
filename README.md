@@ -105,10 +105,18 @@ The full pipeline consists of the following stages. See `run.sh` and `run_parall
 ### Stage 1: Gaussian Initialization
 
 ```bash
+# 1a: Initialize point cloud from sparse views
 python train_gs_init.py -s data/mipnerf360/$SCENE \
     -m debug/gs_init/${SCENE}_${NUM_VIEW} \
     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
     --white_background --random_background
+
+# 1b: Train Gaussians from initialized point cloud
+python train_gs.py -s data/mipnerf360/$SCENE \
+    -m output/gs_init/${SCENE}_${NUM_VIEW} \
+    -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
+    --white_background --random_background \
+    --ply_path debug/gs_init/${SCENE}_${NUM_VIEW}/point_cloud/iteration_1/point_cloud.ply
 ```
 
 ### Stage 2: Leave-One-Out Data Generation

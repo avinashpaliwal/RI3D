@@ -41,3 +41,4 @@ pretrained/
 # uv / venv
 .venv/
 .python-version
+.co3d_staging/
