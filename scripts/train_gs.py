@@ -20,7 +20,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from torchmetrics.functional.regression import pearson_corrcoef
-from arguments import ModelParams, OptimizationParams, PipelineParams
+from utils.arguments import ModelParams, OptimizationParams, PipelineParams
 from gaussian_renderer import network_gui, render
 from scene import GaussianModel, Scene
 from utils.general_utils import safe_state

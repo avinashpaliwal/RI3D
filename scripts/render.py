@@ -24,7 +24,7 @@ from tqdm import tqdm
 import imageio
 from matplotlib import cm
 
-from arguments import ModelParams, PipelineParams, get_combined_args, OptimizationParams
+from utils.arguments import ModelParams, PipelineParams, get_combined_args, OptimizationParams
 from gaussian_renderer import GaussianModel, render
 import lpips
 from scene import Scene

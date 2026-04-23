@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 from torch.utils.data import Dataset
 from gaussian_renderer import render
 from scene import GaussianModel
-from arguments import PipelineParams
+from utils.arguments import PipelineParams
 from scene.cameras import Camera
 from scene.colmap_loader import read_extrinsics_binary, read_intrinsics_binary, qvec2rotmat
 from utils.graphics_utils import focal2fov, fov2focal

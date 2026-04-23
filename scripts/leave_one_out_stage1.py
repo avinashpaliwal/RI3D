@@ -2,7 +2,7 @@ import sys
 import os
 import uuid
 from argparse import ArgumentParser, Namespace
-from arguments import ModelParams, PipelineParams, OptimizationParams
+from utils.arguments import ModelParams, PipelineParams, OptimizationParams
 from random import randint
 import json
 

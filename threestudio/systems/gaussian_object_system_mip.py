@@ -15,7 +15,7 @@ from PIL import Image
 import clip
 from gaussian_renderer import render
 from scene import GaussianModel
-from arguments import PipelineParams, OptimizationParams
+from utils.arguments import PipelineParams, OptimizationParams
 from scene.cameras import Render_Camera
 from utils.sh_utils import SH2RGB
 from utils.loss_utils import l1_loss, l2_loss, ssim, monodisp
@@ -28,7 +28,7 @@ from torchvision.utils import save_image, make_grid
 from torchmetrics.image import PeakSignalNoiseRatio as PSNR, StructuralSimilarityIndexMeasure as SSIM, LearnedPerceptualImagePatchSimilarity as LPIPS
 from torchmetrics.functional.regression import pearson_corrcoef
 from cldm.ddim_hacked import DDIMSampler
-from annotator.util import resize_image, HWC3
+from cldm.annotator_util import resize_image, HWC3
 from cldm.model import create_model, load_state_dict
 from minlora import add_lora, LoRAParametrization
 from threestudio.systems.base import BaseLift3DSystem

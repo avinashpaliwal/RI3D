@@ -41,7 +41,7 @@ dependencies = [
     "tensorboard>=2.15.0",
     "gsplat>=1.5.0",
     "minlora",
-    "clip @ file:///${PROJECT_ROOT}/submodules/CLIP",
+    "clip @ file:///${PROJECT_ROOT}/third_party/CLIP",
 ]
 
 [project.urls]
@@ -57,14 +57,13 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu121" }
 torchvision = { index = "pytorch-cu121" }
-minlora = { path = "submodules/minLoRA" }
-clip = { path = "submodules/CLIP" }
+minlora = { path = "third_party/minLoRA" }
+clip = { path = "third_party/CLIP" }
 
 [tool.setuptools.packages.find]
 include = [
     "scene*", "gaussian_renderer*", "cldm*", "ldm*",
-    "utils*", "threestudio*", "annotator*", "arguments*",
-    "depth_anything*",
+    "utils*", "threestudio*", "depth_anything*",
 ]
 
 [build-system]

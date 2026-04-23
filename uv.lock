@@ -224,7 +224,7 @@ wheels = [
 [[package]]
 name = "clip"
 version = "1.0"
-source = { directory = "submodules/CLIP" }
+source = { directory = "third_party/CLIP" }
 dependencies = [
     { name = "ftfy" },
     { name = "packaging" },
@@ -846,7 +846,7 @@ wheels = [
 [[package]]
 name = "minlora"
 version = "0.1.0"
-source = { directory = "submodules/minLoRA" }
+source = { directory = "third_party/minLoRA" }
 dependencies = [
     { name = "torch" },
 ]
@@ -1399,7 +1399,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "camtools", specifier = ">=0.1.4" },
-    { name = "clip", directory = "submodules/CLIP" },
+    { name = "clip", directory = "third_party/CLIP" },
     { name = "diffusers", specifier = ">=0.24.0,<0.30" },
     { name = "einops", specifier = ">=0.7.0" },
     { name = "gsplat", specifier = ">=1.5.0" },
@@ -1411,7 +1411,7 @@ requires-dist = [
     { name = "lightning-utilities" },
     { name = "lpips", specifier = ">=0.1.4" },
     { name = "matplotlib" },
-    { name = "minlora", directory = "submodules/minLoRA" },
+    { name = "minlora", directory = "third_party/minLoRA" },
     { name = "numpy", specifier = "<2" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "open-clip-torch", specifier = ">=2.23.0" },
