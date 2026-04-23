@@ -20,7 +20,6 @@ from plyfile import PlyData, PlyElement
 from utils.sh_utils import RGB2SH, SH2RGB
 from utils.graphics_utils import BasicPointCloud, z_score_from_percentage
 from utils.general_utils import strip_symmetric, build_scaling_rotation
-import pytorch3d.ops as p3dops
 from kornia.geometry.depth import depth_to_3d
 from utils.graphics_utils import focal2fov, fov2focal, getWorld2View2, transform_pcd, getWorld2View, geom_transform_points
 from scene.xfields import XfieldsFlow
@@ -797,11 +796,15 @@ class GaussianModel:
             init_lambda_sigma = 1
             final_lambda_sigma = float(z_score_from_percentage(1))
             lambda_sigma = init_lambda_sigma + (final_lambda_sigma - init_lambda_sigma) * (step - iter_start) / (iter_end - iter_start)
-        nearest_k_distance = p3dops.knn_points(
-            xyz.unsqueeze(0),
-            xyz.unsqueeze(0),
-            K=int(num_points**0.5),
-        ).dists
+        K = int(num_points**0.5)
+        # Chunked KNN to avoid OOM: each chunk allocates [chunk_size, N] floats
+        mem_per_row = num_points * 4  # 4 bytes per float32
+        chunk_size = max(1, min(4096, int(2e9 / mem_per_row)))  # target ~2GB per chunk
+        nearest_k_distance = torch.empty(num_points, K, device=xyz.device)
+        for i in range(0, num_points, chunk_size):
+            end = min(i + chunk_size, num_points)
+            nearest_k_distance[i:end] = torch.cdist(xyz[i:end], xyz, p=2).pow(2).topk(K, dim=-1, largest=False).values
+        nearest_k_distance = nearest_k_distance.unsqueeze(0)
         mean_nearest_k_distance, std_nearest_k_distance = nearest_k_distance.mean(), nearest_k_distance.std()
         mask = nearest_k_distance.mean(dim = -1) >= (mean_nearest_k_distance + lambda_sigma * std_nearest_k_distance)
         mask = mask.squeeze()
