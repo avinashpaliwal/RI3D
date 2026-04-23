@@ -36,11 +36,10 @@ Tested on Ubuntu with NVIDIA 2080 Ti (CUDA 11.8) and Python 3.10.
 # Install uv if you don't have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create virtual environment and install PyTorch + dependencies
+# Create virtual environment and install all dependencies
 uv venv --python 3.10
 source .venv/bin/activate
-uv pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu118
-uv pip install -r requirements.txt --no-build-isolation
+uv sync
 ```
 
 ### 2. Download pre-trained models

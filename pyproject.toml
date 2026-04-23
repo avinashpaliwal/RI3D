@@ -8,8 +8,61 @@ license = { text = "MIT" }
 authors = [
     { name = "Avinash Paliwal" },
 ]
+dependencies = [
+    "torch==2.1.0",
+    "torchvision==0.16.0",
+    "numpy<2",
+    "setuptools<78",
+    "pytorch-lightning==2.1.0",
+    "lightning-utilities",
+    "diffusers>=0.24.0,<0.30",
+    "transformers>=4.35.0,<4.40",
+    "safetensors",
+    "huggingface-hub",
+    "omegaconf>=2.3.0",
+    "einops>=0.7.0",
+    "open3d>=0.17.0",
+    "opencv-python>=4.8.0",
+    "plyfile>=1.0",
+    "lpips>=0.1.4",
+    "torchmetrics>=1.2.0",
+    "kornia",
+    "scipy",
+    "scikit-learn",
+    "ropwr",
+    "camtools>=0.1.4",
+    "jaxtyping",
+    "open-clip-torch>=2.23.0",
+    "imageio>=2.31.0",
+    "imageio-ffmpeg",
+    "matplotlib",
+    "tqdm",
+    "pyyaml",
+    "tensorboard>=2.15.0",
+    "gsplat>=1.5.0",
+    "minlora",
+    "clip @ file:///${PROJECT_ROOT}/submodules/CLIP",
+]
 
 [project.urls]
 Homepage = "https://people.engr.tamu.edu/nimak/Papers/RI3D/index.html"
 Repository = "https://github.com/avinashpaliwal/RI3D"
 Paper = "https://arxiv.org/abs/2503.10860"
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+minlora = { path = "submodules/minLoRA" }
+clip = { path = "submodules/CLIP" }
+
+[tool.setuptools]
+packages = []
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

@@ -11,12 +11,11 @@ RI3D reconstructs novel views from sparse input images (e.g., 3 views) using 3D 
 Requires Python 3.10, CUDA 11.8, and `uv` for dependency management:
 ```bash
 uv venv --python 3.10 && source .venv/bin/activate
-uv pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu118
-uv pip install -r requirements.txt --no-build-isolation
-python download_hf_models.py  # downloads SD v1.5 + ControlNet Tile to models/
+uv sync
+python download_hf_models.py  # downloads SD v1.5 + ControlNet Tile + SD2 Inpainting to models/
 ```
 
-The `--no-build-isolation` flag is required because `requirements.txt` includes local submodules (`simple-knn`, `minLoRA`, `CLIP`, `pytorch3d`) that build CUDA extensions.
+Dependencies are managed via `pyproject.toml`. Run `uv sync` to install everything including local submodules (`minLoRA`, `CLIP`).
 
 ## Pipeline Stages
 
