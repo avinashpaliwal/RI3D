@@ -60,8 +60,12 @@ torchvision = { index = "pytorch-cu121" }
 minlora = { path = "submodules/minLoRA" }
 clip = { path = "submodules/CLIP" }
 
-[tool.setuptools]
-packages = []
+[tool.setuptools.packages.find]
+include = [
+    "scene*", "gaussian_renderer*", "cldm*", "ldm*",
+    "utils*", "threestudio*", "annotator*", "arguments*",
+    "depth_anything*",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]

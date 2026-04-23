@@ -45,7 +45,7 @@ uv sync
 ### 2. Download pre-trained models
 
 ```bash
-python download_hf_models.py
+python scripts/download_hf_models.py
 ```
 
 This downloads Stable Diffusion v1.5, ControlNet Tile, and SD2 Inpainting to `models/`.
@@ -89,7 +89,7 @@ bash scripts/eval.sh bicycle 3 2
 ### Compute Metrics
 
 ```bash
-python render.py \
+python scripts/render.py \
     -m output/gs_init/${SCENE}_${NUM_VIEW} \
     --sparse_view_num $NUM_VIEW --sh_degree 2 \
     --white_background \
@@ -105,13 +105,13 @@ The full pipeline consists of the following stages. See `scripts/run.sh` and `sc
 
 ```bash
 # 1a: Initialize point cloud from sparse views
-python train_gs_init.py -s data/mipnerf360/$SCENE \
+python scripts/train_gs_init.py -s data/mipnerf360/$SCENE \
     -m debug/gs_init/${SCENE}_${NUM_VIEW} \
     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
     --white_background --random_background
 
 # 1b: Train Gaussians from initialized point cloud
-python train_gs.py -s data/mipnerf360/$SCENE \
+python scripts/train_gs.py -s data/mipnerf360/$SCENE \
     -m output/gs_init/${SCENE}_${NUM_VIEW} \
     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
     --white_background --random_background \
@@ -122,14 +122,14 @@ python train_gs.py -s data/mipnerf360/$SCENE \
 
 ```bash
 # Stage 2a
-python leave_one_out_stage1.py -s data/mipnerf360/$SCENE \
+python scripts/leave_one_out_stage1.py -s data/mipnerf360/$SCENE \
     -m output/gs_init/${SCENE}_loo_${NUM_VIEW} \
     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
     --white_background --random_background \
     --ply_path debug/gs_init/${SCENE}_${NUM_VIEW}/point_cloud/iteration_1/point_cloud.ply
 
 # Stage 2b
-python leave_one_out_stage2.py -s data/mipnerf360/$SCENE \
+python scripts/leave_one_out_stage2.py -s data/mipnerf360/$SCENE \
     -m output/gs_init/${SCENE}_loo_${NUM_VIEW} \
     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
     --white_background --random_background \
@@ -139,7 +139,7 @@ python leave_one_out_stage2.py -s data/mipnerf360/$SCENE \
 ### Stage 3: LoRA Fine-tuning (Repair Model)
 
 ```bash
-python train_lora.py --exp_name controlnet_finetune/${SCENE}_${NUM_VIEW} \
+python scripts/train_lora.py --exp_name controlnet_finetune/${SCENE}_${NUM_VIEW} \
     --prompt xxy5syt00 --sh_degree 2 --resolution 4 --sparse_num $NUM_VIEW \
     --data_dir data/mipnerf360/$SCENE \
     --gs_dir output/gs_init/${SCENE}_${NUM_VIEW} \
@@ -169,7 +169,7 @@ python train_realfill.py \
 
 ```bash
 # Stage 5a: Repair (densification)
-python train_repair.py \
+python scripts/train_repair.py \
     --config configs/gaussian-object.yaml \
     --train --gpu 0 \
     tag="${SCENE}_${NUM_VIEW}" \
@@ -185,7 +185,7 @@ python train_repair.py \
     system.sh_degree=2
 
 # Stage 5b: Inpainting refinement
-python train_repair.py \
+python scripts/train_repair.py \
     --config configs/gaussian-object_inp.yaml \
     --train --gpu 0 \
     tag="${SCENE}_${NUM_VIEW}" \

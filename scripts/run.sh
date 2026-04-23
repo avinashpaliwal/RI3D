@@ -7,32 +7,32 @@ DATASET="data/mipnerf360"
 NUM_VIEW=$2
 
 # Stage 1: Gaussian Initialization
-# python train_gs_init.py -s $DATASET/$1 \
+# python scripts/train_gs_init.py -s $DATASET/$1 \
 #     -m debug/gs_init/$1\_$NUM_VIEW \
 #     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
 #     --white_background --random_background
 
-# python -W ignore train_gs.py -s $DATASET/$1 \
+# python -W ignore scripts/train_gs.py -s $DATASET/$1 \
 #     -m output/gs_init/$1\_$NUM_VIEW \
 #     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
 #     --white_background --random_background \
 #     --ply_path debug/gs_init/${1}_$NUM_VIEW/point_cloud/iteration_1/point_cloud.ply
 
 # Stage 2: Leave-One-Out Data Generation
-# python -W ignore leave_one_out_stage1.py -s $DATASET/$1 \
+# python -W ignore scripts/leave_one_out_stage1.py -s $DATASET/$1 \
 #     -m output/gs_init/$1\_loo\_$NUM_VIEW \
 #     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
 #    --white_background --random_background \
 #    --ply_path debug/gs_init/${1}_$NUM_VIEW/point_cloud/iteration_1/point_cloud.ply
 
-# python -W ignore leave_one_out_stage2.py -s $DATASET/$1 \
+# python -W ignore scripts/leave_one_out_stage2.py -s $DATASET/$1 \
 #     -m output/gs_init/$1\_loo\_$NUM_VIEW \
 #     -r 4 --sparse_view_num $NUM_VIEW --sh_degree 2 \
 #     --white_background --random_background \
 #     --ply_path debug/gs_init/${1}_$NUM_VIEW/point_cloud/iteration_1/point_cloud.ply
 
 # Stage 3: LoRA Fine-tuning (Repair Model)
-# python train_lora.py --exp_name controlnet_finetune/$1\_$NUM_VIEW \
+# python scripts/train_lora.py --exp_name controlnet_finetune/$1\_$NUM_VIEW \
 # --prompt xxy5syt00 --sh_degree 2 --resolution 4 --sparse_num $NUM_VIEW \
 # --data_dir $DATASET/$1 \
 # --gs_dir output/gs_init/$1\_$NUM_VIEW \
@@ -60,7 +60,7 @@ NUM_VIEW=$2
 
 # Stage 5a: Repair (Densification)
 # mkdir -p output_den$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/
-# python -W ignore train_repair.py \
+# python -W ignore scripts/train_repair.py \
 # --config configs/gaussian-object.yaml \
 # --train --gpu 0 \
 # tag="${1}_$NUM_VIEW" \
@@ -78,7 +78,7 @@ NUM_VIEW=$2
 # Stage 5b: Inpainting Refinement
 # mkdir -p output_inp$NUM_VIEW/gaussian_object/$1\_$NUM_VIEW/
 #
-# python -W ignore train_repair.py \
+# python -W ignore scripts/train_repair.py \
 # --config configs/gaussian-object_inp.yaml \
 # --train --gpu 0 \
 # tag="${1}_$NUM_VIEW" \

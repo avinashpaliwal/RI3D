@@ -30,7 +30,7 @@ else
     exit 1
 fi
 
-python render.py \
+python scripts/render.py \
     -m output/gs_init/${SCENE}_${NUM_VIEW} \
     --sparse_view_num $NUM_VIEW --sh_degree 2 \
     --white_background --render_path \

@@ -12,7 +12,7 @@ Requires Python 3.10, CUDA 11.8, and `uv` for dependency management:
 ```bash
 uv venv --python 3.10 && source .venv/bin/activate
 uv sync
-python download_hf_models.py  # downloads SD v1.5 + ControlNet Tile + SD2 Inpainting to models/
+python scripts/download_hf_models.py  # downloads SD v1.5 + ControlNet Tile + SD2 Inpainting to models/
 ```
 
 Dependencies are managed via `pyproject.toml`. Run `uv sync` to install everything including local submodules (`minLoRA`, `CLIP`).
@@ -23,13 +23,13 @@ The pipeline runs sequentially per scene. Key variables: `$SCENE` (e.g., `bicycl
 
 | Stage | Script | Output Directory |
 |-------|--------|-----------------|
-| 1. Gaussian init | `train_gs_init.py` | `debug/gs_init/${SCENE}_${NUM_VIEW}` |
-| 1b. GS training | `train_gs.py` | `output/gs_init/${SCENE}_${NUM_VIEW}` |
-| 2. Leave-one-out data gen | `leave_one_out_stage1.py`, `leave_one_out_stage2.py` | `output/gs_init/${SCENE}_loo_${NUM_VIEW}` |
-| 3. LoRA fine-tune (repair) | `train_lora.py` | `output/controlnet_finetune/${SCENE}_${NUM_VIEW}` |
+| 1. Gaussian init | `scripts/train_gs_init.py` | `debug/gs_init/${SCENE}_${NUM_VIEW}` |
+| 1b. GS training | `scripts/train_gs.py` | `output/gs_init/${SCENE}_${NUM_VIEW}` |
+| 2. Leave-one-out data gen | `scripts/leave_one_out_stage1.py`, `scripts/leave_one_out_stage2.py` | `output/gs_init/${SCENE}_loo_${NUM_VIEW}` |
+| 3. LoRA fine-tune (repair) | `scripts/train_lora.py` | `output/controlnet_finetune/${SCENE}_${NUM_VIEW}` |
 | 4. Inpainting fine-tune | External (RealFill) | `inpainting/${SCENE}_${NUM_VIEW}` |
-| 5a. Repair optimization | `train_repair.py` + `gaussian-object.yaml` | `output_den${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}` |
-| 5b. Inpainting refinement | `train_repair.py` + `gaussian-object_inp.yaml` | `output_inp${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}` |
+| 5a. Repair optimization | `scripts/train_repair.py` + `gaussian-object.yaml` | `output_den${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}` |
+| 5b. Inpainting refinement | `scripts/train_repair.py` + `gaussian-object_inp.yaml` | `output_inp${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}` |
 
 Run a single scene: `bash scripts/run.sh <scene> <num_views>` (uncomment desired stages).
 Run all mip-NeRF 360 scenes in parallel across GPUs: `python scripts/run_parallel_mip.py`.
@@ -44,21 +44,21 @@ Evaluate: `bash scripts/eval.sh <scene> <num_views>` or `python scripts/run_para
    - `gaussian_renderer/` — differentiable rasterization (uses `gsplat`)
    - `arguments/` — `ModelParams`, `OptimizationParams`, `PipelineParams` (argparse-based config)
    - `utils/` — loss functions, camera utilities, depth utilities, graphics math
-   - Training scripts (`train_gs_init.py`, `train_gs.py`, `leave_one_out_*.py`) use argparse + these modules directly
+   - Training scripts (`scripts/train_gs_init.py`, `scripts/train_gs.py`, `scripts/leave_one_out_*.py`) use argparse + these modules directly
 
 2. **threestudio framework** (stage 5): PyTorch Lightning-based system for diffusion-guided optimization.
    - `threestudio/systems/` — `BaseSystem` (PL LightningModule); the Gaussian object system lives here
    - `threestudio/data/loo_mip.py` — data module that loads leave-one-out + sparse views for guided optimization
    - `threestudio/utils/config.py` — OmegaConf-based config loading from YAML files in `configs/`
    - `threestudio/__init__.py` — module registry (`@register` decorator pattern); `find(name)` resolves registered classes
-   - `train_repair.py` is the entry point; it loads config, then uses PL `Trainer`
+   - `scripts/train_repair.py` is the entry point; it loads config, then uses PL `Trainer`
 
 ### Diffusion components (stage 3)
 
 - `cldm/` — ControlNet implementation: `ControlNet`, `ControlledUnetModel`, `ControlLDM` (extends `LatentDiffusion`)
 - `ldm/` — Stable Diffusion backbone (latent diffusion, DDIM/DDPM/DPM samplers, autoencoder, attention)
-- `train_lora.py` — fine-tunes ControlNet Tile + SD with LoRA (uses `minlora` from submodules)
-- `dataset_lora.py` — `GSCacheDataset` renders GS views on-the-fly as training data for LoRA
+- `scripts/train_lora.py` — fine-tunes ControlNet Tile + SD with LoRA (uses `minlora` from submodules)
+- `utils/dataset_lora.py` — `GSCacheDataset` renders GS views on-the-fly as training data for LoRA
 
 ### Other components
 
@@ -66,7 +66,7 @@ Evaluate: `bash scripts/eval.sh <scene> <num_views>` or `python scripts/run_para
 - `tools/pred_monodepth.py` — predicts monocular depth for scene initialization
 - `tools/visual_hull.py` — computes visual hull from sparse views for point cloud initialization
 - `tools/sparse_pc.py` — COLMAP database creation for sparse point clouds
-- `depth_layering.py` — depth-based scene layering via agglomerative clustering
+- `utils/depth_layering.py` — depth-based scene layering via agglomerative clustering
 
 ## Key Conventions
 
