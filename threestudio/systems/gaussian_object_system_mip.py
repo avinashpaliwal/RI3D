@@ -89,8 +89,6 @@ def process(
     t_enc = min(int(denoise_strength * ddim_steps), ddim_steps - 1)
     z = model.get_first_stage_encoding(model.encode_first_stage(img))
     z_enc = ddim_sampler.stochastic_encode(z, torch.tensor([t_enc] * num_samples).to(model.device))
-    # print(z.shape, z_enc.shape)
-
     model.control_scales = [strength * (0.825 ** float(12 - i)) for i in range(13)] if guess_mode else ([strength] * 13)
     # Magic number. IDK why. Perhaps because 0.825**12<0.01 but 0.826**12>0.01
 
@@ -111,15 +109,8 @@ def process(
 from scipy.optimize import curve_fit
 
 def piecewise_func(x, y, mask):
-    # print(x.shape, y.shape, mask.shape)
-    # print((x*mask).nonzero().shape, (y*mask).nonzero().shape)
-    # print(x.max(), x.min(), y.max(), y.min(), mask.max(), mask.min())
-    # Split data at the midpoint
     split_point_x = np.percentile(x[mask.nonzero()], 95)
-    # split_point_x0 = min(x[mask.nonzero()].min(), np.percentile(x[mask == 0], 5))
     split_point_x0 = x[mask.nonzero()].min()
-    # split_point_x = x[mask.nonzero()].max()
-    # print(split_point_x, split_point_x0, x.max(), x.min(), x[mask.nonzero()].min(), np.percentile(x[mask == 0], 5))
 
     # Define the higher-order function (cubic in this case)
     def poly_func(x, a, b, c, d, e):
@@ -162,9 +153,6 @@ def piecewise_func(x, y, mask):
         y_test = np.piecewise(x_test, [x_test < split_point_x, x_test >= split_point_x], 
                             [lambda x: poly_func(x, *params1), lambda x: linear_func(x, *params2)])
     
-    # plt.plot(x_test, y_test)
-    # plt.figure()
-
     if round(split_point_x0, 3) > round(x.min(), 3):
 
         return np.piecewise(x, [x < x[mask.nonzero()].min(), np.logical_and(x >= x[mask.nonzero()].min(), x < split_point_x), x >= split_point_x], 
@@ -298,8 +286,6 @@ class GaussianDreamer(BaseLift3DSystem):
         self.ssim = SSIM(data_range=1.0).to(self.gaussian.device)
         # self.lpips = LPIPS('vgg').to(self.gaussian.device)
         self.lpips_loss = LPIPS('vgg').to(self.gaussian.device)
-        # print(self.lpips_loss.device)
-        # exit()
 
         # data type align
         self.pil_to_tensor = ToTensor()
@@ -571,7 +557,6 @@ class GaussianDreamer(BaseLift3DSystem):
             masks.append(mask[None])
         
         masks = torch.cat(masks, dim=0)[None].cuda()
-        # print(masks.shape)
         return masks
 
     @torch.enable_grad()
@@ -594,7 +579,6 @@ class GaussianDreamer(BaseLift3DSystem):
         ren_depth = torch.tensor(ren_depth).float().cuda()[None, None]
         alpha = torch.tensor(alpha).float().cuda()[None, None, :, :, 0]
 
-        print(monodepth.shape, ren_depth.shape, alpha.shape)
         masks = self.get_masks(monodepth.cpu(), num_bins=5)
         scaled_depth = 1 / (0.5 + (monodepth / monodepth.max()))
 
@@ -613,9 +597,6 @@ class GaussianDreamer(BaseLift3DSystem):
 
             loss = loss + depth_loss
             
-            if i % 1000 == 0:
-                print(loss.item(), monodepth_scaling.item(), monodepth_offset.item(), decoder_scaling.item())
-            # sys.stdout.flush()
             loss.backward()
             if i < 500:
                 optimizer.step()
@@ -627,9 +608,6 @@ class GaussianDreamer(BaseLift3DSystem):
         return opt_depth.cpu().detach().numpy()[0, 0]
     
     def get_bgmask(self, depth_rel, num_bins=10, start=6, start_depth=None):
-        print('depth_rel: ', depth_rel.shape, depth_rel.min(), depth_rel.max())
-
-        
         bins = get_depth_bins(depth=depth_rel, num_bins=num_bins)
         # bins = [1 / x for x in bins]
         # bins.reverse()
@@ -639,8 +617,6 @@ class GaussianDreamer(BaseLift3DSystem):
             mask = np.where((dep >= start_depth) & (dep <= bins[10]), 255, 0).astype(np.uint8)
         else:
             mask = np.where((dep >= bins[start]) & (dep <= bins[10]), 255, 0).astype(np.uint8)
-
-        print('bins: ', bins)
 
         return mask
 
@@ -723,9 +699,6 @@ class GaussianDreamer(BaseLift3DSystem):
 
     @torch.no_grad()
     def inpaint_gs(self, image, alpha, depth, viewpoint_cam, batch):
-        print("image inp: ", image.shape)
-        cv2.imwrite("inp_image.png", np.array(self.tensor_to_pil(image.detach().cpu())))
-
         mask_orig = alpha.copy()
         mask_orig[mask_orig <  0.5] = 0
         mask_orig[mask_orig >= 0.5] = 255
@@ -766,12 +739,7 @@ class GaussianDreamer(BaseLift3DSystem):
         cv2.imwrite("inp_inp.png", np.array(image_wh))
         cv2.imwrite("inp_dep.png", ((depth - depth.min()) * 255 / (depth.max() - depth.min())).astype(np.uint8))
 
-        # print("inpainting..........", mask_inp.shape, image_wh.size)
-        # exit(0)
-
-
         # image_np = self.inpainter.inpaint(image_wh, Image.fromarray(mask_inp), '', strength=1.0)
-        print(image_np.size, image.size)
         
         cv2.imwrite('inpainted.png', image_np)
 
@@ -824,7 +792,6 @@ class GaussianDreamer(BaseLift3DSystem):
         # print(mask_bg.shape)
         kernel = np.ones((9, 9), np.uint8)
         mask_bg = cv2.erode(mask_bg, kernel, iterations=1)[..., None] / 255.
-        print("mask_bg: ", mask_bg.shape, mask_bg.min(), mask_bg.max())
         # dep_max = (depth * (1 - mask_bg[..., 0])).min()
         # mask_bg_depth = np.where(depth < dep_max, 1, 0)[..., None]
         mask_bg_depth = self.get_bgmask(torch.tensor(depth + 1.5e-2)[None, None], start=8, start_depth=start_d*batch['distance'].item())[..., None]
@@ -858,7 +825,6 @@ class GaussianDreamer(BaseLift3DSystem):
         #     # blended_depth = get_merged_depth(depth, monodepth, alpha[..., 0])
         #     blended_depth, _ = get_merged_depth(depth, monodepth, (alpha)[..., 0])
         #     mask_proj     = (mask_inp[..., None]) / 255.
-        print(mask_proj.shape, blended_depth.shape)
         cv2.imwrite("inp_mask_proj_bg.png", (255*mask_proj*mask_bg).astype(np.uint8))
 
         cv2.imwrite("inp_mask_proj.png", (255*mask_proj).astype(np.uint8))
@@ -933,7 +899,6 @@ class GaussianDreamer(BaseLift3DSystem):
                     best_controlnet_out_score = score
 
             best_controlnet_out = cv2.resize(best_controlnet_out, (image_np.shape[1], image_np.shape[0]), interpolation=cv2.INTER_CUBIC)
-            # print("denoiuse : ", image_np.shape, image.shape, best_controlnet_out.shape)
             self.cond_images.append(image.unsqueeze(0))
             self.controlnet_outs.append(self.pil_to_tensor(best_controlnet_out.astype(np.uint8)).to(torch.float32).unsqueeze(0).to(self.gaussian.device))
             self.sds_ws.append(sds_w.to(self.gaussian.device))
@@ -976,7 +941,6 @@ class GaussianDreamer(BaseLift3DSystem):
                         counter = 0
                         # for i in range(self.cfg.refresh_size):
                         # self.inpainting_index = 0#random.randint(0, self.cfg.refresh_size - 1)
-                        print(len(batch['random_poses']), self.inpainting_index, "indicessssssssssssssssssss")
                         R, T = batch['random_poses'][self.inpainting_index]
                         retuns = []
                         batch_inp = batch['random_poses'][::2] #if random.randint(0,1) else batch['random_poses'][1::2]
@@ -997,8 +961,6 @@ class GaussianDreamer(BaseLift3DSystem):
                             alpha  = alphas[0].detach().cpu().numpy()
                             depth  = depths[0].detach().cpu().numpy() / (alpha + 1e-6)
                             alpha  = alpha[..., None]
-                            # print(depth.shape, depths[0].shape, alpha.shape)
-                            # exit()
                             viewpoint_cam = render_results['camera'][0]
 
                             retuns.append(self.inpaint_gs(image, alpha, depth, viewpoint_cam, controlent_batch))
@@ -1099,7 +1061,6 @@ class GaussianDreamer(BaseLift3DSystem):
             alphas = []
             if self.global_step < self.cfg.around_gt_steps:
                 for idx, image in enumerate(images):
-                    # print(idx, self.global_step, batch['index'][idx], self.inpainting_index)
                     cached_controlnet_out = self.controlnet_outs[batch['index'][idx]]
                     if cached_controlnet_out is not None:
                         controlnet_out = cached_controlnet_out
@@ -1127,7 +1088,6 @@ class GaussianDreamer(BaseLift3DSystem):
             # self.log("train/loss_l2", loss_l2)
             # ctrl_loss += sds_ws * loss_l2 * self.C(self.cfg.loss['lambda_l2']) * distance_weight
             self.lpips_loss = self.lpips_loss.to(alphas.device)
-            # print(alphas.device, controlnet_outs.device, images.device, self.lpips_loss.device)
             loss_lpips = torch.nan_to_num(self.lpips_loss(alphas * controlnet_outs, alphas * images))
             self.log("train/loss_lpips", loss_lpips)
             ctrl_loss += sds_ws * loss_lpips * self.C(self.cfg.loss['lambda_lpips']) * distance_weight
@@ -1136,12 +1096,8 @@ class GaussianDreamer(BaseLift3DSystem):
             self.log("train/loss_tv", loss_tv)
             ctrl_loss += sds_ws * loss_tv * self.C(self.cfg.loss['lambda_tv']) * distance_weight
 
-            # print(ctrl_loss.device, loss_l1.device, loss_l2.device, loss_lpips.device, loss_tv.device)
-
             self.log("train/loss", ctrl_loss)
         else:
-            
-            # print('skipping index ---------------------------------', batch['index'][0], self.inpainting_index)
             ctrl_loss = torch.tensor([0]).to(self.gaussian.device)
             # continue
         self.update_learning_rate()
@@ -1155,7 +1111,6 @@ class GaussianDreamer(BaseLift3DSystem):
             images = render_results['images']
             mask = torch.tensor(inp_batch['mask']).to(self.gaussian.device)[None, None].float()
             gt = self.pil_to_tensor(inp_batch['gt']).to(self.gaussian.device)[None].float()
-            # print(images.shape, mask.shape, gt.shape)
             loss += self.C(self.cfg.loss['lambda_lpips']) * torch.nan_to_num(self.lpips_loss(mask * gt, mask * images))
             
             # Ll1 = torch.nan_to_num(l1_loss(mask * gt, mask * images))
