@@ -13,7 +13,7 @@ n_views = [3] * len(scenes)
 
 print(scenes, len(scenes), f'{n_views}')
 
-script = "run.sh"
+script = "scripts/run.sh"
 
 step = 4
 

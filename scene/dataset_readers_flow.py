@@ -290,7 +290,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
 
     if not extra_opts.is_renderrr:
     
-        config = yaml.safe_load(open('argument.yaml', 'r'))
+        config = yaml.safe_load(open('configs/argument.yaml', 'r'))
 
         for idx, cam_info in enumerate(train_cam_infos):
 

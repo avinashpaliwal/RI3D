@@ -80,10 +80,10 @@ tar -xzf ri3d_mipnerf360_3views.tar.gz
 
 ```bash
 # Render novel view video (stage 1 = repair, stage 2 = inpainting)
-bash eval.sh $SCENE $NUM_VIEW $STAGE
+bash scripts/eval.sh $SCENE $NUM_VIEW $STAGE
 
 # Example: bicycle, 3 views, final (stage 2) result
-bash eval.sh bicycle 3 2
+bash scripts/eval.sh bicycle 3 2
 ```
 
 ### Compute Metrics
@@ -99,7 +99,7 @@ python render.py \
 
 ## Training
 
-The full pipeline consists of the following stages. See `run.sh` and `run_parallel_mip.py` for running the full pipeline across all scenes.
+The full pipeline consists of the following stages. See `scripts/run.sh` and `scripts/run_parallel_mip.py` for running the full pipeline across all scenes.
 
 ### Stage 1: Gaussian Initialization
 

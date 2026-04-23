@@ -106,7 +106,7 @@ def evaluate(model_paths):
             json.dump(per_view_dict[scene_dir], fp, indent=True)
 
 
-from depth_layering import get_depth_bins
+from utils.depth_layering import get_depth_bins
 
 def get_bgmask(depth_rel, num_bins=5, start=6, start_depth=None):
     print('depth_rel: ', depth_rel.shape, depth_rel.min(), depth_rel.max())

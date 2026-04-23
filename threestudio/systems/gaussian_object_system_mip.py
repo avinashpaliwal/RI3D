@@ -42,12 +42,12 @@ from utils.bilateral_filtering import sparse_bilateral_filtering
 from utils.realfill_utils import InPaint
 from scene.xfields import XfieldsFlow
 
-from depth_layering import get_depth_bins
+from utils.depth_layering import get_depth_bins
 from kornia.morphology import dilation
 
 import yaml
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-config = yaml.safe_load(open(os.path.join(_project_root, 'argument.yaml'), 'r'))
+config = yaml.safe_load(open(os.path.join(_project_root, 'configs', 'argument.yaml'), 'r'))
 
 @torch.no_grad()
 def process(

@@ -31,9 +31,9 @@ The pipeline runs sequentially per scene. Key variables: `$SCENE` (e.g., `bicycl
 | 5a. Repair optimization | `train_repair.py` + `gaussian-object.yaml` | `output_den${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}` |
 | 5b. Inpainting refinement | `train_repair.py` + `gaussian-object_inp.yaml` | `output_inp${NUM_VIEW}/gaussian_object/${SCENE}_${NUM_VIEW}` |
 
-Run a single scene: `bash run.sh <scene> <num_views>` (uncomment desired stages).
-Run all mip-NeRF 360 scenes in parallel across GPUs: `python run_parallel_mip.py`.
-Evaluate: `bash eval.sh <scene> <num_views>` or `python run_parallel_mip_eval.py`.
+Run a single scene: `bash scripts/run.sh <scene> <num_views>` (uncomment desired stages).
+Run all mip-NeRF 360 scenes in parallel across GPUs: `python scripts/run_parallel_mip.py`.
+Evaluate: `bash scripts/eval.sh <scene> <num_views>` or `python scripts/run_parallel_mip_eval.py`.
 
 ## Architecture
 
@@ -63,9 +63,9 @@ Evaluate: `bash eval.sh <scene> <num_views>` or `python run_parallel_mip_eval.py
 ### Other components
 
 - `depth_anything/` — monocular depth estimation network (DPT architecture)
-- `pred_monodepth.py` — predicts monocular depth for scene initialization
-- `visual_hull.py` — computes visual hull from sparse views for point cloud initialization
-- `sparse_pc.py` — COLMAP database creation for sparse point clouds
+- `tools/pred_monodepth.py` — predicts monocular depth for scene initialization
+- `tools/visual_hull.py` — computes visual hull from sparse views for point cloud initialization
+- `tools/sparse_pc.py` — COLMAP database creation for sparse point clouds
 - `depth_layering.py` — depth-based scene layering via agglomerative clustering
 
 ## Key Conventions

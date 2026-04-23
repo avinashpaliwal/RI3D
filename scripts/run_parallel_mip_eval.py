@@ -13,7 +13,7 @@ scenes = sorted(scenes)
 
 print(scenes, len(scenes), f'{n_views}')
 
-script = "eval.sh"
+script = "scripts/eval.sh"
 
 step = 8
 

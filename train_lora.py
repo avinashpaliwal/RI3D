@@ -8,7 +8,7 @@ from torch import nn
 from pytorch_lightning.loggers import TensorBoardLogger
 from cldm.model import create_model, load_state_dict
 from cldm.logger import ImageLogger, LoraCheckpoint
-from dataset_lora import GSCacheDataset
+from utils.dataset_lora import GSCacheDataset
 from torch.utils.data import DataLoader
 from minlora import add_lora, LoRAParametrization
 
