@@ -16,7 +16,7 @@ uv pip install -r requirements.txt --no-build-isolation
 python download_hf_models.py  # downloads SD v1.5 + ControlNet Tile to models/
 ```
 
-The `--no-build-isolation` flag is required because `requirements.txt` includes local submodules (`submodules/diff-gaussian-rasterization`, `simple-knn`, `minLoRA`, `CLIP`, `pytorch3d`) that build CUDA extensions.
+The `--no-build-isolation` flag is required because `requirements.txt` includes local submodules (`simple-knn`, `minLoRA`, `CLIP`, `pytorch3d`) that build CUDA extensions.
 
 ## Pipeline Stages
 
@@ -42,7 +42,7 @@ Evaluate: `bash eval.sh <scene> <num_views>` or `python run_parallel_mip_eval.py
 
 1. **3DGS framework** (stages 1-2, eval): Based on the original 3D Gaussian Splatting codebase.
    - `scene/` — scene loading (COLMAP), camera models, `GaussianModel` (the core splat representation)
-   - `gaussian_renderer/` — differentiable rasterization (calls into `diff-gaussian-rasterization` CUDA extension)
+   - `gaussian_renderer/` — differentiable rasterization (uses `gsplat`)
    - `arguments/` — `ModelParams`, `OptimizationParams`, `PipelineParams` (argparse-based config)
    - `utils/` — loss functions, camera utilities, depth utilities, graphics math
    - Training scripts (`train_gs_init.py`, `train_gs.py`, `leave_one_out_*.py`) use argparse + these modules directly
