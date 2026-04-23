@@ -1130,9 +1130,17 @@ class GaussianDreamer(BaseLift3DSystem):
     def on_before_optimizer_step(self, optimizer):
         with torch.no_grad():
             if self.true_global_step < self.opt.densify_until_iter:
-                viewspace_point_tensor_grad = torch.zeros_like(self.viewspace_point_list[0])
+                N = self.gaussian.get_xyz.shape[0]
+                viewspace_point_tensor_grad = torch.zeros(N, 2, device=self.gaussian.device)
                 for idx in range(len(self.viewspace_point_list)):
-                    viewspace_point_tensor_grad = viewspace_point_tensor_grad + self.viewspace_point_list[idx].grad
+                    vpt = self.viewspace_point_list[idx]
+                    grad = getattr(vpt, 'absgrad', None)
+                    if grad is None:
+                        grad = vpt.grad
+                    if grad is not None:
+                        if grad.dim() == 3:
+                            grad = grad[0]  # [C, N, 2] -> [N, 2]
+                        viewspace_point_tensor_grad = viewspace_point_tensor_grad + grad[:N, :2]
                 # Keep track of max radii in image-space for pruning
                 self.gaussian.max_radii2D[self.visibility_filter] = torch.max(self.gaussian.max_radii2D[self.visibility_filter], self.radii[self.visibility_filter])
 

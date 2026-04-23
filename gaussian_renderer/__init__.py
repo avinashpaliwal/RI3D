@@ -104,6 +104,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         backgrounds=bg_color[None],
         render_mode="RGB+D",
         packed=False,
+        absgrad=True,
     )
 
     # render_colors: [1, H, W, 4] (RGB + depth in last channel)
@@ -112,16 +113,23 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     rendered_depth = render_colors[0, :, :, 3:4].permute(2, 0, 1)  # [1, H, W]
     rendered_alpha = render_alphas[0, :, :, 0:1].permute(2, 0, 1)  # [1, H, W]
 
-    # Extract radii from meta for densification
+    # gsplat returns radii as [C, N, 2] (x/y radii per camera); take max and flatten to [N]
     radii = meta.get("radii", torch.zeros(xyz.shape[0], dtype=torch.int32, device=xyz.device))
-    if radii.dim() == 2:
+    if radii.dim() == 3:
+        radii = radii[0].amax(dim=-1)  # [C, N, 2] -> [N]
+    elif radii.dim() == 2:
         radii = radii[0]  # [C, N] -> [N]
+
+    # gsplat stores absgrad on meta["means2d"] after backward; pass the original tensor through
+    # so consumers can access .absgrad for densification
+    means2d_meta = meta.get("means2d", None)
+    viewspace_points_out = means2d_meta if means2d_meta is not None else screenspace_points
 
     if clean_indices is not None:
         opacity.data = opacity_copy_copy
 
     return {"render": pool_op(rendered_image),
-            "viewspace_points": screenspace_points_pc if fixed_pc is not None else screenspace_points,
+            "viewspace_points": viewspace_points_out,
             "visibility_filter" : radii > 0,
             "radii": radii,
             "rendered_depth": pool_op(rendered_depth),

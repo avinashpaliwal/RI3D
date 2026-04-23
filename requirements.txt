@@ -27,7 +27,6 @@ tqdm
 pyyaml
 tensorboard>=2.15.0
 gsplat>=1.5.0
-./submodules/simple-knn
 ./submodules/minLoRA
 ./submodules/CLIP
 ./submodules/pytorch3d

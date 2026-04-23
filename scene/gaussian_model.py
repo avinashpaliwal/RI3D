@@ -18,7 +18,6 @@ import os
 from utils.system_utils import mkdir_p
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import RGB2SH, SH2RGB
-from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud, z_score_from_percentage
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 import pytorch3d.ops as p3dops
@@ -820,7 +819,14 @@ class GaussianModel:
         torch.cuda.empty_cache()
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+        # gsplat stores absolute gradients in .absgrad [C, N, 2] after backward
+        grad = getattr(viewspace_point_tensor, 'absgrad', None)
+        if grad is None:
+            grad = viewspace_point_tensor.grad
+        if grad is not None:
+            if grad.dim() == 3:
+                grad = grad[0]  # [C, N, 2] -> [N, 2]
+            self.xyz_gradient_accum[update_filter] += torch.norm(grad[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
 
     def add_densification_stats_no_grad(self, viewspace_point_tensor, update_filter):
