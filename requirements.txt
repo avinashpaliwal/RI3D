@@ -26,7 +26,7 @@ matplotlib
 tqdm
 pyyaml
 tensorboard>=2.15.0
-./submodules/diff-gaussian-rasterization
+gsplat>=1.5.0
 ./submodules/simple-knn
 ./submodules/minLoRA
 ./submodules/CLIP

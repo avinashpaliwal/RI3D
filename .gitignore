@@ -42,3 +42,4 @@ pretrained/
 .venv/
 .python-version
 .co3d_staging/
+.unused/
