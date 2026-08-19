@@ -83,3 +83,8 @@ examples/**/transforms*.json
 # Scratch Notebooks & Logs
 depth.ipynb
 *.log
+*.rrd
+
+# Agent Customization & Local Rules
+.agents/
+AGENTS.md
