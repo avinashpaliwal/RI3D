@@ -1,5 +1,6 @@
 import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import uuid
 from argparse import ArgumentParser, Namespace
 from utils.arguments import ModelParams, PipelineParams, OptimizationParams
@@ -34,7 +35,10 @@ def leave_one_out_training(args, dataset, opt, pipe, testing_iterations, saving_
     gaussians.load_ply(args.ply_path)
     gaussians.training_setup(opt)
     if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
+        try:
+            (model_params, first_iter) = torch.load(checkpoint, weights_only=False)
+        except TypeError:
+            (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]

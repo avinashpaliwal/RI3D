@@ -27,9 +27,11 @@ class PerceptualLoss(nn.Module):
 
     def load_from_pretrained(self, name="vgg_lpips"):
         ckpt = get_ckpt_path(name, "threestudio/utils/lpips")
-        self.load_state_dict(
-            torch.load(ckpt, map_location=torch.device("cpu")), strict=False
-        )
+        try:
+            state = torch.load(ckpt, map_location=torch.device("cpu"), weights_only=False)
+        except TypeError:
+            state = torch.load(ckpt, map_location=torch.device("cpu"))
+        self.load_state_dict(state, strict=False)
         print("loaded pretrained LPIPS loss from {}".format(ckpt))
 
     @classmethod
@@ -38,9 +40,11 @@ class PerceptualLoss(nn.Module):
             raise NotImplementedError
         model = cls()
         ckpt = get_ckpt_path(name)
-        model.load_state_dict(
-            torch.load(ckpt, map_location=torch.device("cpu")), strict=False
-        )
+        try:
+            state = torch.load(ckpt, map_location=torch.device("cpu"), weights_only=False)
+        except TypeError:
+            state = torch.load(ckpt, map_location=torch.device("cpu"))
+        model.load_state_dict(state, strict=False)
         return model
 
     def forward(self, input, target):

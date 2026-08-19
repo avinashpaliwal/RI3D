@@ -36,7 +36,10 @@ def load_module_weights(
     if map_location is None:
         map_location = get_device()
 
-    ckpt = torch.load(path, map_location=map_location)
+    try:
+        ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        ckpt = torch.load(path, map_location=map_location)
     state_dict = ckpt["state_dict"]
     state_dict_to_load = state_dict
 

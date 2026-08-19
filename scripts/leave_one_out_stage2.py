@@ -1,5 +1,6 @@
 import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import uuid
 from argparse import ArgumentParser, Namespace
 from utils.arguments import ModelParams, PipelineParams, OptimizationParams
@@ -35,7 +36,10 @@ def leave_one_out_training(args, dataset, opt, pipe, testing_iterations, saving_
     gaussians.training_setup(opt)
     gaussians.reset_learning_rates(opt)
     if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
+        try:
+            (model_params, first_iter) = torch.load(checkpoint, weights_only=False)
+        except TypeError:
+            (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
         # print('here')
         # exit()
@@ -134,9 +138,12 @@ def leave_one_out_training(args, dataset, opt, pipe, testing_iterations, saving_
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-    # in the end, we use the cached gaussians and the final gaussians to get the \delta gaussians
     cur_status = gaussians.cache
-    pre_status = torch.load(os.path.join(args.model_path, 'gaussians_cache.pth'))
+    cache_file = os.path.join(args.model_path, 'gaussians_cache.pth')
+    try:
+        pre_status = torch.load(cache_file, weights_only=False)
+    except TypeError:
+        pre_status = torch.load(cache_file)
     diffs = {}
     keys = ['_xyz', '_features_dc', '_features_rest', '_scaling', '_rotation', '_opacity']
     for key, pre_c, cur_c in zip(keys, pre_status, cur_status):

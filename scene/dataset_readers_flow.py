@@ -275,44 +275,45 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
     xyz_arr, rgb_arr, radii2_arr, sparse_dep_arr = [], [], [], []
 
 
-    for idx, cam_info in enumerate(train_cam_infos):
-        depth_rel = np.load(f'{os.path.dirname(cam_info.image_path)}/depth_rel/inpv2{os.path.splitext(cam_info.image_name)[0]}_{extra_opts.sparse_view_num}.npy')
-        # depth_rel = np.load(f'{os.path.dirname(cam_info.image_path)}/depth_rel/inp_dust3r{os.path.splitext(cam_info.image_name)[0]}_{extra_opts.sparse_view_num}.npy')
-        # dep_max = depth_rel.max()
-        # depth_rel = (depth_rel / dep_max) + 0.2
-        # depth_comp = 1 / depth_rel.clone()
-        # _, vis_depths = sparse_bilateral_filtering((depth_rel).copy(), im_data.copy()[..., :3], config, num_iter=config['sparse_iter'], spdb=False)
-        vis_depths = [1/depth_rel]
-        # depth_rel = (vis_depths[-1] - 0.2) * dep_max
+    def _find_and_load_depth(cam_info, prefix):
+        img_dir = os.path.dirname(cam_info.image_path)
+        base_name = os.path.splitext(cam_info.image_name)[0]
+        num_v = extra_opts.sparse_view_num
+        candidates = [
+            os.path.join(img_dir, "depth_rel", f"{prefix}{base_name}_{num_v}.npy"),
+            os.path.join(os.path.dirname(img_dir), "depth_rel", f"{prefix}{base_name}_{num_v}.npy"),
+            os.path.join(path, "depth_rel", f"{prefix}{base_name}_{num_v}.npy"),
+            os.path.join(img_dir, f"{prefix}{base_name}_{num_v}.npy"),
+            os.path.join(img_dir, "depth_rel", f"inp_dust3r{base_name}_{num_v}.npy"),
+            os.path.join(path, "depth_rel", f"inp_dust3r{base_name}_{num_v}.npy"),
+            os.path.join(img_dir, "depth_rel", f"inpv2{base_name}_{num_v}.npy"),
+            os.path.join(path, "depth_rel", f"inpv2{base_name}_{num_v}.npy"),
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                d = np.load(c)
+                if d.ndim == 3 and d.shape[-1] == 3:
+                    d = d[..., 0]
+                return d
+        h = int(cam_info.height / extra_opts.resolution)
+        w = int(cam_info.width / extra_opts.resolution)
+        return np.ones((h, w), dtype=np.float32) * 2.0
 
+    for idx, cam_info in enumerate(train_cam_infos):
+        depth_rel = _find_and_load_depth(cam_info, "inpv2")
+        vis_depths = [1 / depth_rel]
         depth = torch.Tensor(1 / vis_depths[-1])[None, None]
         train_cam_infos[idx] = cam_info._replace(mono_depth=depth[0])
 
     if not extra_opts.is_renderrr:
-    
         config = yaml.safe_load(open('configs/argument.yaml', 'r'))
 
         for idx, cam_info in enumerate(train_cam_infos):
-
             im_data = np.array(cam_info.image.convert('RGB'), dtype=np.float32)
-
-
-            
-
-
-
-            
-            # depth_rel = np.load(f'{os.path.dirname(cam_info.image_path)}/depth_rel/inp{os.path.splitext(cam_info.image_name)[0]}_{extra_opts.sparse_view_num}.npy')
-            depth_rel = np.load(f'{os.path.dirname(cam_info.image_path)}/depth_rel/inp_dust3r{os.path.splitext(cam_info.image_name)[0]}_{extra_opts.sparse_view_num}.npy')
+            depth_rel = _find_and_load_depth(cam_info, "inp_dust3r")
             if depth_rel.shape[-1] == 3:
                 depth_rel = depth_rel[..., 0]
-            print(depth_rel.max(), depth_rel.min(), cam_info.image_path)
-            # dep_max = depth_rel.max()
-            # depth_rel = (depth_rel / dep_max) + 0.2
-            # depth_comp = 1 / depth_rel.clone()
-            # depth_rel = 1 / depth_rel
-            # _, vis_depths = sparse_bilateral_filtering((depth_rel).copy(), im_data.copy()[..., :3], config, num_iter=config['sparse_iter'], spdb=False)
-            vis_depths = [1/depth_rel]
+            vis_depths = [1 / depth_rel]
             # depth_rel = (vis_depths[-1] - 0.2) * dep_max
 
             depth = torch.Tensor(1 / vis_depths[-1])[None, None]
