@@ -20,12 +20,15 @@ class InPaint():
             revision=None
         )
 
-        self.pipe.unet = UNet2DConditionModel.from_pretrained(
-            model_path, subfolder="unet", revision=None,
-        )
-        self.pipe.text_encoder = CLIPTextModel.from_pretrained(
-            model_path, subfolder="text_encoder", revision=None,
-        )
+        import os
+        if model_path and os.path.isdir(os.path.join(model_path, "unet")):
+            self.pipe.unet = UNet2DConditionModel.from_pretrained(
+                model_path, subfolder="unet", revision=None,
+            )
+        if model_path and os.path.isdir(os.path.join(model_path, "text_encoder")):
+            self.pipe.text_encoder = CLIPTextModel.from_pretrained(
+                model_path, subfolder="text_encoder", revision=None,
+            )
         self.pipe.scheduler = DDPMScheduler.from_config(self.pipe.scheduler.config)
         self.pipe = self.pipe.to("cuda")
 

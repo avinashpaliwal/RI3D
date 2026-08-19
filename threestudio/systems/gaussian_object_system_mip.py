@@ -254,7 +254,7 @@ class GaussianDreamer(BaseLift3DSystem):
         controlnet_num_samples: int = 1
         sh_degree: int = 2
         inpainting_dir: str = "inpainting"
-        enable_inpainting: bool = True
+        enable_inpainting: bool = False
 
         ctrl_steps: int = 1000
         ctrl_loss_ratio_begin: float = 1.0

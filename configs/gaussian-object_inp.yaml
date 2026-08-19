@@ -19,6 +19,7 @@ data:
   refresh_interval: 400
 system_type: "gaussian-object-system"
 system:
+  enable_inpainting: True
   model_name: "control_v11f1e_sd15_tile"
   exp_name: ""
   lora_name: "lora-step=1799.ckpt"
