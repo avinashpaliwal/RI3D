@@ -1,46 +1,85 @@
-# Python
+# Byte-compiled / optimized / C extensions
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+*.o
+*.a
 *.egg-info/
 build/
 dist/
-*.so
+eggs/
+*.egg
 
-# macOS
+# Operating System & IDE
 .DS_Store
-
-# IDE
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Training outputs
-output*/
-debug*/
-checkpoints/
-
-# Model weights (download separately)
-models/*.ckpt
-models/*.pth
-models/*.safetensors
-
-# Intermediate data
-*.npy
-*.pkl
-!data/**/*.json
-
-# Development artifacts
-zip_output/
-*.zip
-*.tar.gz
-depth.ipynb
-
-# Data and pretrained models (download separately)
-data/
-pretrained/
-
-# uv / venv
+# Environments & Package Caches
 .venv/
+venv/
+env/
 .python-version
 .co3d_staging/
 .unused/
 torchhub/
+.cache/
+*/.cache/
+.gradio/
+*/.gradio/
+
+# Training Outputs, Checkpoints & Temp Dirs
+output*/
+debug*/
+tmp/
+*/tmp/
+checkpoints/
+mast3r/checkpoints/
+runs/
+wandb/
+zip_output/
+*.zip
+*.tar.gz
+*.tar
+*.gz
+
+# Model Weights (downloaded via scripts/download_hf_models.py)
+models/*
+!models/.gitkeep
+!models/README.md
+pretrained/
+*.ckpt
+*.pth
+*.safetensors
+*.bin
+*.onnx
+
+# Point Clouds & Large Data
+data/
+*.ply
+
+# Intermediate / Generated Cache Files
+*.npy
+*.npz
+*.pkl
+depth_rel/
+*/depth_rel/
+examples/**/depth_rel/
+examples/**/train_test_split_*.json
+examples/**/transforms*.json
+
+# Preserve config JSON files
+!configs/**/*.json
+
+# Scratch Notebooks & Logs
+depth.ipynb
+*.log
