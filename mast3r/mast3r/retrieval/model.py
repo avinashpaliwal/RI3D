@@ -134,6 +134,7 @@ class RetrievalModel(nn.Module):
         else:
             raise NotImplementedError(featweights)
         self.nfeat = nfeat
+        self.pretrained_retrieval = pretrained_retrieval
         if self.pretrained_retrieval is not None:
             try:
                 ckpt = torch.load(pretrained_retrieval, 'cpu', weights_only=False)

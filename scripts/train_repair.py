@@ -2,7 +2,10 @@ import argparse
 import logging
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ri3d_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ri3d_root)
+sys.path.insert(0, os.path.join(ri3d_root, "third_party", "minLoRA"))
+sys.path.insert(0, os.path.join(ri3d_root, "third_party", "CLIP"))
 
 
 class ColoredFilter(logging.Filter):

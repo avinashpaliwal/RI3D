@@ -70,12 +70,14 @@ def run_command(command, dry_run=False):
     if dry_run:
         return True
     
-    # Ensure current project directory and mast3r directory are on PYTHONPATH
+    # Ensure current project directory, mast3r, and third_party submodules are on PYTHONPATH
     env = os.environ.copy()
     ri3d_root = os.path.dirname(os.path.abspath(__file__))
     mast3r_path = os.path.join(ri3d_root, "mast3r")
+    minlora_path = os.path.join(ri3d_root, "third_party", "minLoRA")
+    clip_path = os.path.join(ri3d_root, "third_party", "CLIP")
     current_pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{ri3d_root}:{mast3r_path}:{current_pythonpath}"
+    env["PYTHONPATH"] = f"{ri3d_root}:{mast3r_path}:{minlora_path}:{clip_path}:{current_pythonpath}"
     
     import subprocess
     proc = subprocess.run(command, shell=True, env=env)
@@ -517,6 +519,11 @@ def main():
             effective_source_path, auto_orient=False, dry_run=args.dry_run, num_views=args.num_views
         )
         curr_stage_idx += 1
+    elif args.sfm_config == "unposed" and os.path.isdir(os.path.join(args.output_dir, "mast3r_sfm")):
+        effective_source_path = os.path.join(args.output_dir, "mast3r_sfm")
+        _, _, image_dir, image_files = validate_and_standardize_images(
+            effective_source_path, auto_orient=False, dry_run=args.dry_run, num_views=args.num_views
+        )
 
     # Prepare scene dataset structures & depth priors
     setup_ri3d_scene_data(effective_source_path, image_dir, image_files, num_views=args.num_views, resolution=args.resolution, dry_run=args.dry_run)

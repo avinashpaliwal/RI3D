@@ -12,8 +12,8 @@ from ldm.modules.diffusionmodules.util import checkpoint
 try:
     import xformers
     import xformers.ops
-    XFORMERS_IS_AVAILBLE = True
-except:
+    XFORMERS_IS_AVAILBLE = hasattr(xformers, 'ops') and hasattr(xformers.ops, 'memory_efficient_attention')
+except Exception:
     XFORMERS_IS_AVAILBLE = False
 
 # CrossAttn precision handling
@@ -229,8 +229,15 @@ class MemoryEfficientCrossAttention(nn.Module):
             (q, k, v),
         )
 
-        # actually compute the attention, what we cannot get enough of
-        out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
+        # actually compute the attention
+        if hasattr(xformers, 'ops') and hasattr(xformers.ops, 'memory_efficient_attention'):
+            out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
+        else:
+            q_sdpa = q.view(b, self.heads, -1, self.dim_head)
+            k_sdpa = k.view(b, self.heads, -1, self.dim_head)
+            v_sdpa = v.view(b, self.heads, -1, self.dim_head)
+            out_sdpa = F.scaled_dot_product_attention(q_sdpa, k_sdpa, v_sdpa)
+            out = out_sdpa.view(b * self.heads, -1, self.dim_head)
 
         if exists(mask):
             raise NotImplementedError

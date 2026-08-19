@@ -8,11 +8,13 @@ from typing import Optional, Any
 
 from ldm.modules.attention import MemoryEfficientCrossAttention
 
+import torch.nn.functional as F
+
 try:
     import xformers
     import xformers.ops
-    XFORMERS_IS_AVAILBLE = True
-except:
+    XFORMERS_IS_AVAILBLE = hasattr(xformers, 'ops') and hasattr(xformers.ops, 'memory_efficient_attention')
+except Exception:
     XFORMERS_IS_AVAILBLE = False
     print("No module 'xformers'. Proceeding without it.")
 
@@ -255,7 +257,13 @@ class MemoryEfficientAttnBlock(nn.Module):
             .contiguous(),
             (q, k, v),
         )
-        out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
+        if hasattr(xformers, 'ops') and hasattr(xformers.ops, 'memory_efficient_attention'):
+            out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
+        else:
+            q_sdpa = q.unsqueeze(1)
+            k_sdpa = k.unsqueeze(1)
+            v_sdpa = v.unsqueeze(1)
+            out = F.scaled_dot_product_attention(q_sdpa, k_sdpa, v_sdpa).squeeze(1)
 
         out = (
             out.unsqueeze(0)

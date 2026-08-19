@@ -3,7 +3,15 @@ import os
 import urllib
 import warnings
 from typing import Any, Union, List
-from pkg_resources import packaging
+try:
+    import packaging.version
+    packaging_module = packaging
+except ImportError:
+    try:
+        from pkg_resources import packaging as packaging_module
+    except ImportError:
+        packaging_module = None
+packaging = packaging_module
 
 import torch
 from PIL import Image
