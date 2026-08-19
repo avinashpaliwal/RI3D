@@ -40,6 +40,8 @@ torchhub/
 # Training Outputs, Checkpoints & Temp Dirs
 output*/
 debug*/
+controlnet_finetune/
+inpainting/
 tmp/
 */tmp/
 checkpoints/
