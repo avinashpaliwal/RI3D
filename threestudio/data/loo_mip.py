@@ -126,6 +126,33 @@ def layered_midpoints(N):
 
 @register("loo-dataset")
 class LooDataset(Dataset):
+    def _load_depth(self, cam_info):
+        """Locate a view's metric depth prior.
+
+        Mirrors the candidate chain in scene/dataset_readers_flow.py so both
+        entry points accept the same layouts -- the depth writer emits into the
+        scene root and the image directory, and which one exists depends on how
+        the scene was prepared.
+        """
+        img_dir = os.path.dirname(cam_info.image_path)
+        base_name = os.path.splitext(cam_info.image_name)[0]
+        candidates = [
+            os.path.join(d, f"{prefix}{base_name}_{self.sparse_num}.npy")
+            for d in (
+                os.path.join(img_dir, "depth_rel"),
+                os.path.join(os.path.dirname(img_dir), "depth_rel"),
+                os.path.join(self.data_dir, "depth_rel"),
+            )
+            for prefix in ("inpv2", "inp_dust3r")
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                return np.load(c)
+        raise FileNotFoundError(
+            f"No depth prior for {base_name} ({self.sparse_num} views). Looked in:\n  "
+            + "\n  ".join(candidates)
+        )
+
     def __init__(self, cfg: LooDataModuleConfig, split: str = 'train', sparse_num: int = 0):
         super().__init__()
         self.cfg = cfg
@@ -217,24 +244,16 @@ class LooDataset(Dataset):
             self.fovxs.append(cam_info.FovX)
             self.fovys.append(cam_info.FovY)
 
-            # depth_rel = np.load(f'{os.path.dirname(cam_info.image_path)}/depth_rel/inp{os.path.splitext(cam_info.image_name)[0]}.npy')
-            # if depth_rel.shape[-1] == 3:
-            #     depth_rel = depth_rel[..., 0]
+            # Metric z-depth in SfM world units, aligned to the MASt3R pointmaps
+            # by utils/depth_align.py -- used as-is, no rescaling.
+            depth_rel = self._load_depth(cam_info)
+            if depth_rel.ndim == 3 and depth_rel.shape[-1] == 3:
+                depth_rel = depth_rel[..., 0]
 
-            # if depth_rel.min() < self.min_depth:
-            #     self.min_depth = depth_rel.min()
-                
-            # if depth_rel.max() > self.max_depth:
-            #     self.max_depth = depth_rel.max()
-            
-            
-            depth_rel = np.load(f'{os.path.dirname(cam_info.image_path)}/depth_rel/inpv2{os.path.splitext(cam_info.image_name)[0]}_{self.sparse_num}.npy')
-            # dep_max = depth_rel.max()
-            # depth_rel = (depth_rel / dep_max) + 0.2
-            # depth_rel = 1 / depth_rel
-            # depth_comp = 1 / depth_rel.clone()
-            # _, vis_depths = sparse_bilateral_filtering((depth_rel).copy(), im_data.copy()[..., :3], config, num_iter=config['sparse_iter'], spdb=False)
-            # depth_rel = (vis_depths[-1] - 0.2) * dep_max
+            finite = depth_rel[np.isfinite(depth_rel) & (depth_rel > 0)]
+            if finite.size:
+                self.min_depth = min(self.min_depth, float(finite.min()))
+                self.max_depth = max(self.max_depth, float(finite.max()))
 
             # mask image
             image = (torch.from_numpy(np.array(cam_info.image))/255.).permute(2, 0, 1) # C, H, W

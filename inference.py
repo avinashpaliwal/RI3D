@@ -303,7 +303,171 @@ def run_mast3r_sfm_and_extract_pointmap(source_path, output_scene_dir, num_views
     return mast3r_out_dir
 
 
-def setup_ri3d_scene_data(scene_path, image_dir, image_files, num_views=3, resolution=4, dry_run=False):
+def resolve_train_view_names(scene_path, num_views):
+    """Reproduce the train-view selection performed by the dataset reader.
+
+    `readColmapSceneInfo` sorts every camera by image_name *before* indexing
+    with train_ids, then subsamples with linspace. `depths<N>.npy` /
+    `confs<N>.npy` are indexed positionally against that final list, so this
+    ordering has to match exactly or the per-view arrays are silently
+    mismatched.
+
+    Returns [(image_name, image_path), ...] in reader order.
+    """
+    tf_path = os.path.join(scene_path, "transforms.json")
+    if not os.path.exists(tf_path):
+        log_error(f"Missing '{tf_path}'. For unposed data, include 'sfm' in --stages (e.g. '--stages sfm,1').")
+        sys.exit(1)
+
+    with open(tf_path, "r") as f:
+        transforms = json.load(f)
+
+    entries = []
+    for frame in transforms["frames"]:
+        rel = frame["file_path"]
+        path = rel if os.path.isabs(rel) else os.path.normpath(os.path.join(scene_path, rel))
+        entries.append((os.path.basename(path).split(".")[0], path))
+    entries.sort(key=lambda e: e[0])
+
+    with open(os.path.join(scene_path, f"train_test_split_{num_views}.json"), "r") as f:
+        train_ids = json.load(f)["train_ids"]
+
+    train_entries = [entries[i] for i in train_ids]
+    idx_sub = [round(i) for i in np.linspace(0, len(train_entries) - 1, num_views)]
+    return [e for idx, e in enumerate(train_entries) if idx in idx_sub]
+
+
+def _depth_from_pointmap(scene_path, name, K, width, height, c2w):
+    """Dense metric depth taken straight from the MASt3R pointmap.
+
+    The pointmap is already a dense depth image on its own grid, so resampling
+    it to the target resolution keeps every value MASt3R produced. Projecting
+    the points individually instead scatters them into a finer grid and leaves
+    most target pixels empty (~20% coverage at 2x upsampling), which is what
+    forces the monocular prior to invent the remaining 80%.
+    """
+    from utils.pointmap_utils import resample_view_depth, render_view_depth, fill_holes_nearest
+
+    resampled = resample_view_depth(scene_path, name, K, width, height, c2w=c2w)
+    if resampled is not None:
+        depth, conf, valid = resampled
+        # MASt3R occasionally places a pixel behind the camera (z <= 0). Those
+        # are rare and low-confidence, but writing one into depth_rel would
+        # back-project a point behind the view, and the disparity guard in the
+        # reader filters to z > 0 before taking its median so it would not warn.
+        if not valid.all():
+            depth = fill_holes_nearest(depth, valid)
+        return depth, conf, valid, "resampled"
+
+    # MASt3R centre-cropped this view, so the grid no longer maps linearly onto
+    # the image; fall back to per-point projection plus a nearest-neighbour fill.
+    depth, conf, valid = render_view_depth(scene_path, name, K, width, height, c2w=c2w)
+    if not valid.any():
+        raise ValueError(f"{name}: pointmap projects to no valid pixel in the target view")
+    return fill_holes_nearest(depth, valid), conf, valid, "projected+filled"
+
+
+def generate_aligned_depth(scene_path, image_dir, num_views, depth_source="pointmap"):
+    """Write metric depth priors in SfM world units for the sparse train views.
+
+    The pipeline (point-cloud init, Gaussian radii, every monocular depth loss)
+    reads `depth_rel/*.npy` as metric z-depth in MASt3R world units. Two ways to
+    produce it:
+
+    * "pointmap" -- resample MASt3R's own dense pointmap depth. Metric by
+      construction and multi-view consistent, since it is the same geometry the
+      poses came from.
+    * "align" -- run Depth-Anything and fit its affine-invariant disparity onto
+      the pointmap's metric anchors (`utils.depth_align`). Keeps the monocular
+      network's fine detail, at the cost of a global affine that cannot track
+      the true disparity relation: the residual carries a depth-dependent bias
+      and heavy tails, which bends the far field.
+
+    Returns True when depth was written, False when there is no pointmap to
+    work from (e.g. a pre-processed mip-NeRF 360 scene shipping its own
+    depth_rel).
+    """
+    from utils.pointmap_utils import load_target_intrinsics, load_sfm_poses
+
+    pointmaps_dir = os.path.join(scene_path, "pointmaps")
+    if not os.path.isdir(pointmaps_dir):
+        return False
+
+    K, width, height = load_target_intrinsics(scene_path)
+    poses = load_sfm_poses(scene_path)
+    train_views = resolve_train_view_names(scene_path, num_views)
+    log_success(
+        f"Writing depth for {len(train_views)} train view(s) at {width}x{height} "
+        f"from '{depth_source}' (target grid from transforms.json)"
+    )
+
+    # Both locations are searched downstream: the reader walks a candidate list
+    # while threestudio/data/loo_mip.py historically hard-coded the image_dir one.
+    depth_dirs = [os.path.join(scene_path, "depth_rel"), os.path.join(image_dir, "depth_rel")]
+    for d in depth_dirs:
+        os.makedirs(d, exist_ok=True)
+
+    if depth_source == "align":
+        import cv2
+        import torch
+        from torchvision.transforms import ToTensor
+
+        from utils.depth_align import align_mono_to_pointmap
+        from utils.depth_utils import estimate_depth
+
+    depths, confs = [], []
+    for name, img_path in train_views:
+        if name not in poses:
+            raise KeyError(f"{name} has no pose in {scene_path}/cameras.json")
+
+        depth, conf, valid, how = _depth_from_pointmap(
+            scene_path, name, K, width, height, poses[name]
+        )
+
+        if depth_source == "align":
+            img = Image.open(img_path).convert("RGB")
+            with torch.no_grad():
+                disparity = estimate_depth(ToTensor()(img).cuda()).cpu().numpy()
+            if disparity.shape != (height, width):
+                interp = cv2.INTER_AREA if disparity.shape[0] > height else cv2.INTER_LINEAR
+                disparity = cv2.resize(disparity, (width, height), interpolation=interp)
+
+            fitted, info = align_mono_to_pointmap(disparity, depth, valid, conf=conf)
+            if fitted is None:
+                log_warn(f"{name}: monocular fit rejected ({info['fallback']}); keeping pointmap depth")
+            else:
+                depth = fitted
+                log_success(
+                    f"{name}: anchors {valid.mean()*100:.1f}%  inliers {info['inlier_ratio']*100:.0f}%"
+                    f"  median err {info['median_rel_err']*100:.2f}%"
+                    f"{'  (piecewise)' if info['refined'] else ''}"
+                    f"  depth [{info['depth_range'][0]:.2f}, {info['depth_range'][1]:.2f}]"
+                )
+        else:
+            finite = depth[np.isfinite(depth) & (depth > 0)]
+            log_success(
+                f"{name}: {how}  coverage {valid.mean()*100:.1f}%"
+                f"  conf>1.5 {(conf > 1.5).mean()*100:.1f}%"
+                f"  depth [{finite.min():.2f}, {finite.max():.2f}]"
+            )
+
+        depth = depth.astype(np.float32)
+        for d in depth_dirs:
+            np.save(os.path.join(d, f"inp_dust3r{name}_{num_views}.npy"), depth)
+            np.save(os.path.join(d, f"inpv2{name}_{num_views}.npy"), depth)
+        depths.append(depth)
+        confs.append(conf.astype(np.float32))
+
+    # Stacked at the depth maps' own resolution so confs[idx].reshape(-1) lines
+    # up 1:1 with the per-view back-projected points in the reader.
+    np.save(os.path.join(scene_path, f"depths{num_views}.npy"), np.stack(depths, axis=0))
+    np.save(os.path.join(scene_path, f"confs{num_views}.npy"), np.stack(confs, axis=0))
+    log_success(f"Wrote metric depth + MASt3R confidence for {len(depths)} view(s)")
+    return True
+
+
+def setup_ri3d_scene_data(scene_path, image_dir, image_files, num_views=3, resolution=4,
+                          dry_run=False, depth_source="pointmap"):
     """
     Ensure all required RI3D data files are populated:
     - transforms.json
@@ -312,7 +476,7 @@ def setup_ri3d_scene_data(scene_path, image_dir, image_files, num_views=3, resol
     - depths<N>.npy & confs<N>.npy
     """
     os.makedirs(scene_path, exist_ok=True)
-    
+
     # 1. Check or generate train_test_split_<N>.json
     split_file = os.path.join(scene_path, f"train_test_split_{num_views}.json")
     total_imgs = len(image_files)
@@ -329,62 +493,41 @@ def setup_ri3d_scene_data(scene_path, image_dir, image_files, num_views=3, resol
             json.dump(split_data, f, indent=2)
         log_success(f"Generated sparse train/test split: {split_file} (train: {train_indices})")
     
-    # 2. Check or generate depths<N>.npy and confs<N>.npy
-    depths_file = os.path.join(scene_path, f"depths{num_views}.npy")
-    confs_file = os.path.join(scene_path, f"confs{num_views}.npy")
-    if (not os.path.exists(depths_file) or not os.path.exists(confs_file)) and not dry_run:
-        sample_img = Image.open(image_files[0])
-        h, w = sample_img.height // resolution, sample_img.width // resolution
-        dummy_depths = np.zeros((num_views, h, w), dtype=np.float32)
-        dummy_confs = np.ones((num_views, h, w), dtype=np.float32) * 5.0
-        np.save(depths_file, dummy_depths)
-        np.save(confs_file, dummy_confs)
-        log_success(f"Generated flow/conf metadata arrays: {depths_file}, {confs_file}")
+    if dry_run:
+        return
 
-    # 3. Check or generate depth_rel directory
+    # 2. Metric depth priors + per-view confidence, aligned to the MASt3R pointmaps.
+    if generate_aligned_depth(scene_path, image_dir, num_views, depth_source=depth_source):
+        return
+
+    # 3. No pointmaps: the scene must already ship metric depth_rel from its own
+    # preprocessing (this is how the mip-NeRF 360 scenes are distributed).
+    # Never synthesise a stand-in here -- writing raw disparity or a constant
+    # into depth_rel is exactly the mismatch this pipeline is meant to avoid,
+    # and it fails silently all the way through training.
     depth_rel_dirs = [
         os.path.join(scene_path, "depth_rel"),
-        os.path.join(image_dir, "depth_rel")
+        os.path.join(image_dir, "depth_rel"),
     ]
-    for d in depth_rel_dirs:
-        os.makedirs(d, exist_ok=True)
-    
-    # Check if depth maps exist for each image
-    missing_depths = []
-    for img_file in image_files:
-        base_name = Path(img_file).stem
-        target_files = []
-        for d in depth_rel_dirs:
-            npy1 = os.path.join(d, f"inp_dust3r{base_name}_{num_views}.npy")
-            npy2 = os.path.join(d, f"inpv2{base_name}_{num_views}.npy")
-            target_files.extend([npy1, npy2])
-        
-        if any(not os.path.exists(f) for f in target_files):
-            missing_depths.append((img_file, target_files))
+    train_views = resolve_train_view_names(scene_path, num_views)
+    missing = [
+        name for name, _ in train_views
+        if not any(
+            os.path.exists(os.path.join(d, f"{prefix}{name}_{num_views}.npy"))
+            for d in depth_rel_dirs
+            for prefix in ("inpv2", "inp_dust3r")
+        )
+    ]
+    if missing:
+        log_error(f"No MASt3R pointmaps in {scene_path}/pointmaps and no depth_rel for: {', '.join(missing)}")
+        log_error("Run the SfM stage (--sfm_config unposed) so depth can be aligned to the pointmaps.")
+        sys.exit(1)
 
-    if missing_depths and not dry_run:
-        log_success(f"Estimating depth maps for {len(missing_depths)} images using Depth-Anything...")
-        try:
-            from utils.depth_utils import estimate_depth
-            import torch
-            from torchvision.transforms import ToTensor
-            
-            for img_path, targets in missing_depths:
-                img_pil = Image.open(img_path).convert("RGB")
-                img_tensor = ToTensor()(img_pil).cuda()
-                with torch.no_grad():
-                    depth = estimate_depth(img_tensor).cpu().numpy()
-                for t in targets:
-                    np.save(t, depth)
-            log_success("Relative depth maps generated in depth_rel/")
-        except Exception as e:
-            log_warn(f"Could not run Depth-Anything online ({e}). Generating fallback dummy depth maps...")
-            for img_path, targets in missing_depths:
-                img_pil = Image.open(img_path)
-                h, w = img_pil.height // resolution, img_pil.width // resolution
-                fallback_depth = np.ones((h, w), dtype=np.float32) * 2.0
-                for t in targets:
-                    np.save(t, fallback_depth)
+    for fname in (f"depths{num_views}.npy", f"confs{num_views}.npy"):
+        if not os.path.exists(os.path.join(scene_path, fname)):
+            log_error(f"Missing {os.path.join(scene_path, fname)} and no pointmaps available to rebuild it.")
+            sys.exit(1)
+    log_success("Using the scene's existing metric depth_rel priors.")
 
 
 def parse_args():
@@ -412,6 +555,12 @@ def parse_args():
                         help="Maximum Spherical Harmonics degree")
     parser.add_argument("--prompt", type=str, default="xxy5syt00",
                         help="Rare token / text prompt identifier for LoRA personalization")
+    parser.add_argument("--depth_source", type=str, default="pointmap", choices=["pointmap", "align"],
+                        help="Where the metric depth prior comes from. 'pointmap' resamples "
+                             "MASt3R's dense pointmap depth directly (metric and multi-view "
+                             "consistent by construction). 'align' instead runs Depth-Anything "
+                             "and fits its disparity onto the pointmap anchors, keeping monocular "
+                             "detail but introducing a depth-dependent bias in the far field.")
 
     # Stage Controls
     parser.add_argument("--stages", type=str, default="all",
@@ -519,14 +668,22 @@ def main():
             effective_source_path, auto_orient=False, dry_run=args.dry_run, num_views=args.num_views
         )
         curr_stage_idx += 1
-    elif args.sfm_config == "unposed" and os.path.isdir(os.path.join(args.output_dir, "mast3r_sfm")):
-        effective_source_path = os.path.join(args.output_dir, "mast3r_sfm")
-        _, _, image_dir, image_files = validate_and_standardize_images(
-            effective_source_path, auto_orient=False, dry_run=args.dry_run, num_views=args.num_views
-        )
+    elif args.sfm_config == "unposed":
+        mast3r_dir = os.path.join(args.output_dir, "mast3r_sfm")
+        if os.path.isdir(mast3r_dir):
+            effective_source_path = mast3r_dir
+            _, _, image_dir, image_files = validate_and_standardize_images(
+                effective_source_path, auto_orient=False, dry_run=args.dry_run, num_views=args.num_views
+            )
+        else:
+            log_error(f"Unposed scene '{source_path}' requires camera poses and pointmaps from SfM, but '{mast3r_dir}' was not found.")
+            log_error("Please include 'sfm' in --stages (e.g. '--stages sfm,1' or '--stages all') to run MASt3R-SfM first.")
+            sys.exit(1)
 
     # Prepare scene dataset structures & depth priors
-    setup_ri3d_scene_data(effective_source_path, image_dir, image_files, num_views=args.num_views, resolution=args.resolution, dry_run=args.dry_run)
+    setup_ri3d_scene_data(effective_source_path, image_dir, image_files, num_views=args.num_views,
+                          resolution=args.resolution, dry_run=args.dry_run,
+                          depth_source=args.depth_source)
 
     # =========================================================================
     # Stage 1a: Gaussian Point Cloud Initialization
@@ -685,10 +842,28 @@ def main():
     # =========================================================================
     # Rendering & Final Model Export
     # =========================================================================
+    def _latest_gs_ply(model_dir):
+        """Highest-iteration checkpoint under <model_dir>/point_cloud/iteration_*.
+
+        The iteration count is not fixed: OptimizationParams.iterations is 10_000
+        here (upstream 3DGS defaults to 30_000) and train_gs.py saves at whatever
+        --iterations resolves to, so the directory name cannot be hardcoded.
+        """
+        pc_dir = os.path.join(model_dir, "point_cloud")
+        if not os.path.isdir(pc_dir):
+            return None
+        iters = []
+        for d in os.listdir(pc_dir):
+            ply = os.path.join(pc_dir, d, "point_cloud.ply")
+            if d.startswith("iteration_") and os.path.isfile(ply):
+                try:
+                    iters.append((int(d.split("_")[-1]), ply))
+                except ValueError:
+                    continue
+        return max(iters)[1] if iters else None
+
     best_ply = final_stage2_ply if os.path.exists(final_stage2_ply) else (
-        final_stage1_ply if os.path.exists(final_stage1_ply) else (
-            f"{output_gs_init_dir}/point_cloud/iteration_30000/point_cloud.ply" if os.path.exists(f"{output_gs_init_dir}/point_cloud/iteration_30000/point_cloud.ply") else None
-        )
+        final_stage1_ply if os.path.exists(final_stage1_ply) else _latest_gs_ply(output_gs_init_dir)
     )
 
     if args.render_video and ("render" in stages_to_run or "5b" in stages_to_run or "5a" in stages_to_run or "1b" in stages_to_run):

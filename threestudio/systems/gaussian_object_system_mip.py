@@ -374,12 +374,13 @@ class GaussianDreamer(BaseLift3DSystem):
                 disp_render = 1 / render_dep[0].clamp(1e-6).reshape(-1) # shape: [N]
                 depth_loss = monodisp(disp_mono, disp_render, 'l1')[-1]
             elif mono_loss_type == "pearson":
-                zoe_depth = viewpoint_cam.mono_depth[viewpoint_cam.mask > 0.5].clamp(1e-6)
+                # mono_depth is metric depth in SfM world units, so it correlates
+                # directly with the render. The old -depth / 1/(depth+200) pair
+                # were two ways of flipping Depth-Anything disparity into a
+                # depth-like ordering, and both anti-correlate now.
+                mono_depth = viewpoint_cam.mono_depth[viewpoint_cam.mask > 0.5].clamp(1e-6)
                 rendered_depth = render_dep[0][viewpoint_cam.mask > 0.5].clamp(1e-6)
-                depth_loss = torch.nan_to_num(min(
-                    (1 - pearson_corrcoef( -zoe_depth, rendered_depth)),
-                    (1 - pearson_corrcoef(1 / (zoe_depth + 200.), rendered_depth))
-                ))
+                depth_loss = torch.nan_to_num(1 - pearson_corrcoef(mono_depth, rendered_depth))
             else:
                 raise NotImplementedError
 
@@ -609,14 +610,14 @@ class GaussianDreamer(BaseLift3DSystem):
     
     def get_bgmask(self, depth_rel, num_bins=10, start=6, start_depth=None):
         bins = get_depth_bins(depth=depth_rel, num_bins=num_bins)
-        # bins = [1 / x for x in bins]
-        # bins.reverse()
         
-        dep = depth_rel[0, 0]
+        dep = depth_rel[0, 0].detach().cpu().numpy() if isinstance(depth_rel, torch.Tensor) else depth_rel[0, 0]
+        max_bin = bins[-1]
+        start_idx = min(start, len(bins) - 1)
         if start_depth is not None:
-            mask = np.where((dep >= start_depth) & (dep <= bins[10]), 255, 0).astype(np.uint8)
+            mask = np.where((dep >= start_depth) & (dep <= max_bin), 255, 0).astype(np.uint8)
         else:
-            mask = np.where((dep >= bins[start]) & (dep <= bins[10]), 255, 0).astype(np.uint8)
+            mask = np.where((dep >= bins[start_idx]) & (dep <= max_bin), 255, 0).astype(np.uint8)
 
         return mask
 
@@ -758,23 +759,25 @@ class GaussianDreamer(BaseLift3DSystem):
 
         mask = np.where(alpha > 0.5, 1, 0)
                         
-        bins = get_depth_bins(depth=torch.tensor(monodepth)[None, None], num_bins=5, mask=mask[None, None])
+        bins = get_depth_bins(depth=torch.tensor(monodepth, dtype=torch.float32)[None, None], num_bins=5, mask=mask[None, None])
         bins = [1/x for x in bins]
 
-        pw = RobustPWRegression(objective="huber", degree=1, monotonic_trend="ascending", extrapolation="continue", extrapolation_bounds=(1e-3, 0.5))
-        pw.fit(1/monodepth.reshape(-1)[mask.reshape(-1) == 1], 1/depth.reshape(-1)[mask.reshape(-1) == 1], splits=bins[1:-1])
-        monodepth = 1/pw.predict(1/monodepth.reshape(-1)).reshape(monodepth.shape)
+        try:
+            pw = RobustPWRegression(objective="huber", degree=1, monotonic_trend="ascending", extrapolation="continue", extrapolation_bounds=(1e-3, 0.5))
+            pw.fit(1/monodepth.reshape(-1)[mask.reshape(-1) == 1], 1/depth.reshape(-1)[mask.reshape(-1) == 1], splits=bins[1:-1])
+            pred_disp = pw.predict(1/monodepth.reshape(-1))
+            pred_disp = np.clip(pred_disp, 1e-4, None)
+            refined = (1.0 / pred_disp).reshape(monodepth.shape)
+            if np.isfinite(refined).all() and refined.min() > 0:
+                monodepth = refined
+        except Exception:
+            pass
 
-        # kernel = np.ones((5, 5), np.uint8)
-        # mask = cv2.close(mask, kernel, iterations=1)#[..., None]
-        # depth_rel = 1 / monodepth
-        # _, vis_depths = sparse_bilateral_filtering((depth_rel).copy(), image_np.copy()[..., :3], config, num_iter=config['sparse_iter'], spdb=False)
-        # monodepth = 1 / vis_depths[-1]
+        monodepth = np.nan_to_num(monodepth, nan=float(depth.max()), posinf=float(depth.max()), neginf=float(depth.min()))
+        monodepth = np.clip(monodepth, 1.5e-2, None)
 
-        # monodepth = depth.min() + 1 / (monodepth / monodepth.max() + 10 / (depth.max() - depth.min()))
-        # monodepth = piecewise_func(monodepth.reshape(-1), depth.reshape(-1), alpha.reshape(-1)).reshape(depth.shape)
-
-        cv2.imwrite("inp_monodepth.png", ((monodepth - depth.min()) * 255 / (depth.max() - depth.min())).astype(np.uint8))
+        dep_range = max(float(depth.max() - depth.min()), 1e-6)
+        cv2.imwrite("inp_monodepth.png", ((monodepth - depth.min()) * 255 / dep_range).astype(np.uint8))
         
         if self.inpaint_counter in [0, 1]:
             startt = 8
@@ -788,13 +791,13 @@ class GaussianDreamer(BaseLift3DSystem):
         else:
             startt = 2
             start_d = 1.2
-        mask_bg = self.get_bgmask(torch.clamp(torch.tensor(monodepth), min=1.5e-2)[None, None], start=startt)
+        mask_bg = self.get_bgmask(torch.tensor(monodepth, dtype=torch.float32)[None, None], start=startt)
         # print(mask_bg.shape)
         kernel = np.ones((9, 9), np.uint8)
         mask_bg = cv2.erode(mask_bg, kernel, iterations=1)[..., None] / 255.
         # dep_max = (depth * (1 - mask_bg[..., 0])).min()
         # mask_bg_depth = np.where(depth < dep_max, 1, 0)[..., None]
-        mask_bg_depth = self.get_bgmask(torch.tensor(depth + 1.5e-2)[None, None], start=8, start_depth=start_d*batch['distance'].item())[..., None]
+        mask_bg_depth = self.get_bgmask(torch.tensor(depth + 1.5e-2, dtype=torch.float32)[None, None], start=8, start_depth=start_d*batch['distance'].item())[..., None]
         mask_bg_depth = cv2.erode(mask_bg_depth, kernel, iterations=1)[..., None] / 255.
         # print(mask_bg.shape)
         # mask_proj = 

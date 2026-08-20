@@ -110,8 +110,12 @@ def readMipTransforms(path, resolution=4):
         T = extr[:3, 3]
 
 
-        FovY = focal2fov(focal_length_x, height)
-        FovX = focal2fov(focal_length_y, width)
+        # fl_x is the horizontal focal length and fl_y the vertical one; every
+        # consumer pairs FovX with width and FovY with height (see the K build
+        # below, GaussianModel.depth_densify, and Camera.__init__). Identical to
+        # the PINHOLE branch of readColmapCameras.
+        FovY = focal2fov(focal_length_y, height)
+        FovX = focal2fov(focal_length_x, width)
 
         image_path = osp.join(path, impath)
         image_name = osp.basename(image_path).split(".")[0]
@@ -224,6 +228,30 @@ def storePly(path, xyz, rgb):
 
 
 
+def _check_metric_depth(depth, source):
+    """Guard against disparity being loaded where metric depth is expected.
+
+    `depth_rel/*.npy` must hold metric z-depth in SfM world units. Feeding it
+    raw Depth-Anything disparity instead inverts near/far and is typically an
+    order of magnitude off -- and because everything downstream still runs, the
+    mistake is invisible until reconstruction quality silently collapses.
+    Heuristic: Depth-Anything emits unnormalised disparity whose median lands
+    in the tens-to-hundreds, while SfM world units for these scenes put median
+    depth in the single digits. Measured on sceneA the two populations are
+    medians 37-76 (disparity) against 2.5-3.9 (metric), so 20 separates them
+    with margin on both sides. A genuinely large metric scene could trip this;
+    it only warns.
+    """
+    finite = depth[np.isfinite(depth) & (depth > 0)]
+    if finite.size and np.median(finite) > 20.0:
+        print(
+            f"[WARNING] {source}: median depth {np.median(finite):.1f} looks like "
+            "disparity, not metric depth. Regenerate it with the aligned depth stage "
+            "(utils/depth_align.py); training on this will invert the geometry."
+        )
+    return depth
+
+
 def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_init=None):
  
     cam_infos_unsorted = readMipTransforms(path=path, resolution=extra_opts.resolution)
@@ -294,15 +322,16 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
                 d = np.load(c)
                 if d.ndim == 3 and d.shape[-1] == 3:
                     d = d[..., 0]
-                return d
-        h = int(cam_info.height / extra_opts.resolution)
-        w = int(cam_info.width / extra_opts.resolution)
-        return np.ones((h, w), dtype=np.float32) * 2.0
+                return _check_metric_depth(d, c)
+        raise FileNotFoundError(
+            f"No depth prior for {base_name} (prefix '{prefix}', {num_v} views). Looked in:\n  "
+            + "\n  ".join(candidates)
+            + "\nRun the SfM/depth stage so depth aligned to the MASt3R pointmaps is written."
+        )
 
     for idx, cam_info in enumerate(train_cam_infos):
-        depth_rel = _find_and_load_depth(cam_info, "inpv2")
-        vis_depths = [1 / depth_rel]
-        depth = torch.Tensor(1 / vis_depths[-1])[None, None]
+        # depth_rel holds metric z-depth in SfM world units (see utils/depth_align.py).
+        depth = torch.Tensor(_find_and_load_depth(cam_info, "inpv2"))[None, None]
         train_cam_infos[idx] = cam_info._replace(mono_depth=depth[0])
 
     if not extra_opts.is_renderrr:
@@ -313,12 +342,11 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
             depth_rel = _find_and_load_depth(cam_info, "inp_dust3r")
             if depth_rel.shape[-1] == 3:
                 depth_rel = depth_rel[..., 0]
-            vis_depths = [1 / depth_rel]
-            # depth_rel = (vis_depths[-1] - 0.2) * dep_max
 
-            depth = torch.Tensor(1 / vis_depths[-1])[None, None]
+            # Metric depth in SfM world units -- back-projects straight into the
+            # frame the MASt3R poses live in, no rescaling needed.
+            depth = torch.Tensor(depth_rel)[None, None]
             print(depth.max(), depth.min(), cam_info.image_path)
-            # train_cam_infos[idx] = cam_info._replace(mono_depth=depth[0])
 
             # Init radius equal to shorter length of the rectangle. Default: Height
             # Radii per frame
@@ -344,11 +372,25 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
             # print(height, width, depth.shape, xyz_cam.shape, radii2.shape, K, extra_opts.resolution, cam_info.width, cam_info.height)
             # exit()
 
-            # xyz_cam = xyz_cam[masks[idx].reshape(-1) > 4]
-            # rgb = rgb[masks[idx].reshape(-1) > 4]
-            # radii2 = radii2[masks[idx].reshape(-1) > 4]
+            # Optional MASt3R-confidence gate on the initial points. Off by
+            # default: it makes the per-view point counts unequal, which breaks
+            # the `fused_point_cloud.shape[0] // num_cameras` reshape that
+            # GaussianModel.create_from_pcd performs when mono_d_so_enable=True
+            # (scripts/train_gs_init.py). Safe for train_gs.py / leave_one_out_*.
+            conf_thr = getattr(extra_opts, "depth_conf_thr", 0.0)
+            if conf_thr > 0:
+                conf = masks[idx].reshape(-1)
+                if conf.shape[0] != xyz_cam.shape[0]:
+                    raise ValueError(
+                        f"confs{extra_opts.sparse_view_num}.npy view {idx} has {conf.shape[0]} "
+                        f"entries but the depth map back-projects to {xyz_cam.shape[0]} points; "
+                        "both must be written at the transforms.json resolution."
+                    )
+                keep = conf > conf_thr
+                print(f"  conf > {conf_thr}: keeping {keep.sum()}/{keep.size} points for {cam_info.image_name}")
+                xyz_cam, rgb, radii2 = xyz_cam[keep], rgb[keep], radii2[keep]
 
-            
+
             # w2c = np.zeros((4, 4))
             # w2c[:3, :3] = cam_info.R.transpose()
             # w2c[:3, 3] = cam_info.T

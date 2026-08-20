@@ -262,10 +262,10 @@ def cal_loss(opt, args, image, render_pkg, viewpoint_cam, bg, silhouette_loss_ty
             # print(viewpoint_cam.mono_depth.shape, render_pkg['rendered_depth'].shape, disp_mono.shape, disp_render.shape)
             depth_loss = monodisp(disp_mono, disp_render, 'l1')[-1]
         elif mono_loss_type == "pearson":
-            disp_mono = viewpoint_cam.mono_depth.clamp(min=1e-6).reshape(-1, 1) # shape: [N]
-            disp_render = render_pkg["rendered_depth"].clamp(min=1e-6).reshape(-1, 1) # shape: [N]
-            # print(disp_mono.shape, disp_render.shape)
-            depth_loss = (1 - pearson_corrcoef(disp_render, disp_mono)).mean()
+            # Both sides are metric depth in SfM world units; correlate directly.
+            depth_mono = viewpoint_cam.mono_depth.clamp(min=1e-6).reshape(-1, 1) # shape: [N]
+            depth_render = render_pkg["rendered_depth"].clamp(min=1e-6).reshape(-1, 1) # shape: [N]
+            depth_loss = (1 - pearson_corrcoef(depth_render, depth_mono)).mean()
         else:
             raise NotImplementedError
 
@@ -302,6 +302,10 @@ if __name__ == "__main__":
                         help="the init pcd name. 'random' for random, 'origin' for pcd from the whole scene")
     parser.add_argument("--transform_the_world", action="store_true", help="Transform the world to the origin")
     parser.add_argument('--mono_depth_weight', type=float, default=0.005, help="The rate of monodepth loss")
+    parser.add_argument('--depth_conf_thr', type=float, default=0.0,
+                        help="Drop init points whose MASt3R pointmap confidence is below this "
+                             "(0 disables). Not supported by train_gs_init.py, whose "
+                             "mono_d_so_enable path needs equal point counts per view.")
     parser.add_argument('--ply_path', type=str, help="path to the ply file")
 
     args = parser.parse_args(sys.argv[1:])

@@ -75,9 +75,7 @@ data/
 *.pkl
 depth_rel/
 */depth_rel/
-examples/**/depth_rel/
-examples/**/train_test_split_*.json
-examples/**/transforms*.json
+examples/**
 
 # Preserve config JSON files
 !configs/**/*.json
@@ -90,3 +88,4 @@ depth.ipynb
 # Agent Customization & Local Rules
 .agents/
 AGENTS.md
+.claude/

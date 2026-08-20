@@ -245,12 +245,13 @@ def cal_loss(opt, args, image, render_pkg, viewpoint_cam, bg, silhouette_loss_ty
             disp_render = 1 / render_pkg["rendered_depth"].clamp(1e-6).reshape(-1) # shape: [N]
             depth_loss = monodisp(disp_mono, disp_render, 'l1')[-1]
         elif mono_loss_type == "pearson":
-            zoe_depth = viewpoint_cam.mono_depth[viewpoint_cam.mask > 0.5].clamp(1e-6)
+            # mono_depth is metric depth in SfM world units, so it correlates
+            # directly with the render. The old -depth / 1/(depth+200) pair were
+            # two ways of flipping Depth-Anything disparity into a depth-like
+            # ordering, and both anti-correlate now.
+            mono_depth = viewpoint_cam.mono_depth[viewpoint_cam.mask > 0.5].clamp(1e-6)
             rendered_depth = render_pkg["rendered_depth"][viewpoint_cam.mask > 0.5].clamp(1e-6)
-            depth_loss = min(
-                (1 - pearson_corrcoef( -zoe_depth, rendered_depth)),
-                (1 - pearson_corrcoef(1 / (zoe_depth + 200.), rendered_depth))
-                )
+            depth_loss = 1 - pearson_corrcoef(mono_depth, rendered_depth)
         else:
             raise NotImplementedError
 

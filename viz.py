@@ -170,7 +170,12 @@ def parse_transforms_json(transforms_path: str) -> List[Dict]:
 
     for idx, frame in enumerate(data.get('frames', [])):
         c2w = np.array(frame['transform_matrix'], dtype=np.float32)
-        # OpenGL to OpenCV conversion for Rerun standard viewing if needed
+        # transforms.json stores c2w in the OpenGL convention (+y up, -z
+        # forward), matching what scene/dataset_readers_flow.py undoes on load.
+        # rr.Pinhole defaults to RDF (OpenCV: +y down, +z forward), so without
+        # this flip every camera faces 180 degrees away from the scene and any
+        # depth logged under it unprojects behind the pointmap.
+        c2w = c2w @ np.diag([1, -1, -1, 1]).astype(np.float32)
         frame_fl_x = frame.get('fl_x', fl_x)
         frame_fl_y = frame.get('fl_y', fl_y)
         frame_w = frame.get('w', w)
@@ -278,9 +283,17 @@ def discover_pipeline_artifacts(root_path: str) -> Dict[str, any]:
             artifacts['sfm_dir'] = candidate_sfm
             break
 
-    # Look for point clouds in SfM
+    # Look for point clouds in SfM.
+    # Deliberately excludes "point_cloud.ply": scene/dataset_readers_flow.py
+    # drops that file into the scene directory as an intermediate, and its points
+    # are in each view's CAMERA frame, not world -- the reader hands camera-frame
+    # points to GaussianModel, which applies the per-camera c2w itself inside
+    # get_xyz (the mono_d_so_enable path). Logging it here as a world-frame cloud
+    # stacks every view on top of the origin and looks badly misaligned against
+    # points.ply. The world-frame init cloud is the one saved by scene.save(),
+    # under <model_path>/point_cloud/iteration_*/point_cloud.ply.
     if artifacts['sfm_dir']:
-        for ply_name in ["point_cloud.ply", "points.ply", "chart_pcd.ply"]:
+        for ply_name in ["points.ply", "chart_pcd.ply"]:
             p = os.path.join(artifacts['sfm_dir'], ply_name)
             if os.path.isfile(p):
                 artifacts['sfm_plys'].append(p)
