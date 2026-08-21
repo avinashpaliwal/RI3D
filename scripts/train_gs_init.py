@@ -69,6 +69,27 @@ def training(args, dataset, opt, pipe, testing_iterations, saving_iterations, ch
     print(viewpoint_cam.original_image.shape)
     gaussians.set_ref_camera(viewpoint_cam, outChannels=1)
 
+    # Watermark pixels back-project to geometry that no loss will ever correct:
+    # the photometric losses mask them out, so those Gaussians get zero gradient
+    # and are therefore never pushed toward real content *and* never pruned
+    # (pruning is opacity-driven, opacity is gradient-driven). They freeze wearing
+    # the watermark's colour and float wherever the depth prior put them. Kill
+    # them here instead -- masking the loss stops the watermark being corrected,
+    # only this stops it being created.
+    #
+    # Zero the opacity rather than dropping the points: create_from_pcd under
+    # mono_d_so_enable=True reshapes by `shape[0] // num_cameras` and needs equal
+    # per-view counts (the same reason --depth_conf_thr is unsupported here, see
+    # docs/point_map.md 4). Stage 1b's first densify_and_prune then removes them,
+    # since it prunes below opacity 0.005.
+    if getattr(gaussians, "masks", None) is not None:
+        dead = gaussians.masks.reshape(-1) <= 0
+        n_dead = int(dead.sum())
+        if n_dead:
+            gaussians._opacity.data[dead] = -10.0  # sigmoid(-10) ~ 4.5e-5
+            print(f"[i] Watermark mask: zeroed opacity on {n_dead:,} of "
+                  f"{dead.numel():,} init points ({n_dead / dead.numel() * 100:.2f}%)")
+
     scene.save(first_iter)
     exit()
     for iteration in range(first_iter, opt.iterations + 1):

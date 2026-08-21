@@ -34,8 +34,27 @@ if __name__ == '__main__':
     
     # Config
     parser.add_argument('-c', '--config', type=str, default='unposed',
-        help='name of the config to use. Should be either "unposed", "posed" or a custom config.')
-    
+        help='name of the config to use. Should be either "unposed", "posed" or a custom config. '
+             'Resolved as configs/<backend>/<config>.yaml.')
+
+    # Backend
+    parser.add_argument('-b', '--backend', type=str, default='ggpt', choices=['ggpt', 'mast3r'],
+        help='SfM engine. "ggpt" runs VGGT + RoMaV2 + BA + DLT via ggpt_sfm/run_ggpt.py; '
+             '"mast3r" runs the original MASt3R-SfM. Both write the same output contract.')
+    parser.add_argument('--ggpt_root', type=str, default='/home/nguyen/projects/GGPT',
+        help='Path to the GGPT checkout (ggpt backend only).')
+    parser.add_argument('--ggpt_python', type=str, default='/media/nguyen/conda/envs/ggpt/bin/python',
+        help='Interpreter for the ggpt backend. GGPT needs romav2, which the RI3D environment '
+             'does not carry, so the worker runs out-of-process in its own env.')
+    parser.add_argument('--fuse_mode', type=str, default='global_scale',
+        choices=['global_scale', 'per_view_scale', 'per_view_affine'],
+        help='How VGGT depth is reconciled with the DLT anchors (ggpt backend only).')
+    parser.add_argument('--ggpt_refine', action='store_true',
+        help='Additionally run the GGPT PTv3 point transformer on the fused pointmap.')
+    parser.add_argument('--watermark_mask', type=str, default=None,
+        help='PNG mask (255 = ignore) of burned-in watermarks, from tools/detect_watermark.py. '
+             'Masked pixels are excluded from matching, BA and triangulation. ggpt backend only.')
+
     # Environment
     # parser.add_argument('--env', type=str, default='matcha',
     #     help='name of the environment to use.')
@@ -67,15 +86,56 @@ if __name__ == '__main__':
         else:
             output_dir_name = args.source_path.split(os.sep)[-1]
         args.output_path = os.path.join('output', output_dir_name)
-        args.output_path = os.path.join(args.output_path, 'mast3r_sfm')
+        args.output_path = os.path.join(args.output_path, f'{args.backend}_sfm')
     os.makedirs(args.output_path, exist_ok=True)
     print(f"[INFO] Scene will be saved to: {args.output_path}")
-            
+
+    config_path = os.path.join('configs', args.backend, args.config + '.yaml')
+    if not os.path.exists(config_path):
+        if args.backend == 'ggpt' and args.config == 'posed':
+            # GGPT's bundle adjustment always re-solves extrinsics -- upstream
+            # sfm/sfm_func.py carries "TODO: support known camera poses", and
+            # ba_config.calibrated only substitutes known intrinsics. Honouring
+            # --config posed here would silently discard the calibration the
+            # user asked to keep, so refuse rather than approximate.
+            sys.exit(
+                "[ERROR] The ggpt backend cannot fix known camera poses: its bundle adjustment "
+                "always re-solves extrinsics. Use --backend mast3r for pre-calibrated scenes, "
+                "or --config unposed to accept a fresh solve."
+            )
+        sys.exit(f"[ERROR] No config at {config_path}")
+
+    if args.backend == 'ggpt':
+        command = " ".join([
+            args.ggpt_python, "ggpt_sfm/run_ggpt.py",
+            "--scene_path", args.source_path,
+            "--output_dir", args.output_path,
+            "--ggpt_root", args.ggpt_root,
+            "--config", os.path.abspath(config_path),
+            "--n_images", str(args.n_images),
+            "--use_all_images" if args.use_all_images else "",
+            "--image_idx" if args.image_idx is not None else "",
+            *[str(i) for i in (args.image_idx or [])],
+            "--randomize_images" if args.randomize_images else "",
+            "--fuse_mode", args.fuse_mode,
+            "--ggpt_refine" if args.ggpt_refine else "",
+            *(["--watermark_mask", args.watermark_mask] if args.watermark_mask else []),
+        ])
+        print(f"[INFO] Running command:\n", command)
+        run_command_safe(command)
+        sys.exit(0)
+
+    if args.watermark_mask:
+        # MASt3R runs its own matching and global alignment; nothing here plumbs a
+        # mask into it. Silently ignoring the flag would leave the watermarks in
+        # the solve while the user believed they were excluded.
+        sys.exit("[ERROR] --watermark_mask is only supported by the ggpt backend. MASt3R-SfM has "
+                 "a separate matching path with no mask plumbing.")
+
     # Load config
-    config_path = os.path.join('configs/mast3r', args.config + '.yaml')
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-        
+
     # Define command
     tmp_idx = args.image_idx if args.image_idx is not None else []
     command = " ".join([

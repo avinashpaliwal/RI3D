@@ -43,7 +43,7 @@ def ssim(img1, img2, window_size=11, size_average=True):
 
     return _ssim(img1, img2, window, window_size, channel, size_average)
 
-def _ssim(img1, img2, window, window_size, channel, size_average=True):
+def _ssim(img1, img2, window, window_size, channel, size_average=True, return_map=False):
     mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
     mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
 
@@ -60,10 +60,70 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
 
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
 
+    if return_map:
+        return ssim_map
     if size_average:
         return ssim_map.mean()
     else:
         return ssim_map.mean(1).mean(1).mean(1)
+
+def masked_l1_loss(network_output, gt, mask):
+    """L1 over supervised pixels only. `mask` is 1 = supervise, 0 = ignore.
+
+    Normalised by the number of supervised pixels, not by the frame, so masking
+    does not quietly scale the loss down and change its balance against the other
+    terms. `mask` broadcasts over channels.
+    """
+    if mask is None:
+        return l1_loss(network_output, gt)
+    m = mask.to(network_output.dtype)
+    denom = m.sum() * (network_output.shape[-3] if m.shape[-3] == 1 else 1)
+    if denom < 1:
+        return torch.zeros((), device=network_output.device, dtype=network_output.dtype)
+    return (torch.abs(network_output - gt) * m).sum() / denom
+
+
+def masked_ssim(img1, img2, mask, window_size=11, size_average=True):
+    """SSIM restricted to windows that contain no ignored pixel.
+
+    SSIM is windowed, so an elementwise mask still lets watermark pixels leak into
+    every window that overlaps them. Eroding the valid mask by the window radius
+    keeps only fully-clean windows -- the effective mask is therefore larger than
+    the one supplied, which is the safe direction.
+
+    Falls back to plain SSIM when erosion leaves nothing, which happens only if
+    the mask covers essentially the whole frame.
+    """
+    if mask is None:
+        return ssim(img1, img2, window_size=window_size, size_average=size_average)
+
+    channel = img1.size(-3)
+    window = create_window(window_size, channel)
+    if img1.is_cuda:
+        window = window.cuda(img1.get_device())
+    window = window.type_as(img1)
+
+    ssim_map = _ssim(img1, img2, window, window_size, channel, size_average=False, return_map=True)
+
+    m = mask.to(img1.dtype)
+    if m.dim() == 2:
+        m = m[None, None]
+    elif m.dim() == 3:
+        m = m[None]
+    # Erode: a window is clean only if every pixel under it is supervised.
+    valid = (F.avg_pool2d(m, window_size, stride=1, padding=window_size // 2) >= 1.0 - 1e-6)
+    # _ssim preserves its input's rank, so ssim_map is (C, H, W) when called from
+    # training (every call site passes CHW) and (N, C, H, W) when batched. Drop the
+    # leading dims added for avg_pool2d back down to match before expanding.
+    while valid.dim() > ssim_map.dim():
+        valid = valid.squeeze(0)
+    valid = valid.to(img1.dtype).expand_as(ssim_map)
+
+    total = valid.sum()
+    if total < 1:
+        return ssim_map.mean()
+    return (ssim_map * valid).sum() / total
+
 
 def monodisp(gt_depth: torch.Tensor, dyn_depth: torch.Tensor, loss_type: str = "l1"):
     t_d = torch.median(dyn_depth, dim=-1, keepdim=True).values

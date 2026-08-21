@@ -24,7 +24,8 @@ in [`point_map.md`](point_map.md).
 
 | stage | script / config | output |
 |---|---|---|
-| `sfm` | `scripts/run_sfm.py` → `mast3r/run_mast3r.py` | `<out>/mast3r_sfm/` |
+| `wm` | `tools/detect_watermark.py` (opt-in) | `<out>/watermark_mask.png` |
+| `sfm` | `scripts/run_sfm.py` → `ggpt_sfm/run_ggpt.py` or `mast3r/run_mast3r.py` | `<out>/${BACKEND}_sfm/` |
 | — | `inference.py` (depth prep) | `<scene>/depth_rel/`, `depths$N.npy`, `confs$N.npy` |
 | `1a` | `scripts/train_gs_init.py` | `debug/gs_init/${SCENE}_${N}` |
 | `1b` | `scripts/train_gs.py` | `output/gs_init/${SCENE}_${N}` |
@@ -39,15 +40,93 @@ in [`point_map.md`](point_map.md).
 
 ## Phase 1 — Geometry
 
-### Stage 0 · MASt3R-SfM
+### Stage `wm` · Watermark masking (opt-in)
+
+Listing-site photos often carry a logo burned into every frame at the *same* pixel coordinates.
+`examples/sceneB` has three: an opaque "HiFriendz" logo top-left, five semi-transparent repeats
+along the bottom, and a faint "chợTỐT" in the centre — ~5.5% of every frame.
+
+Fixed-position overlays are worse for SfM than ordinary noise. They match themselves at zero
+disparity, and because `run_sfm` ranks bundle-adjustment track candidates by SuperPoint saliency,
+a crisp watermark edge outscores real scene texture and is *preferentially* promoted into BA.
+
+`tools/detect_watermark.py` finds them with **cross-image edge persistence**: a watermark edge
+appears at the same pixel in every photo while a scene edge moves with the camera, so the per-pixel
+minimum Sobel magnitude over the stack isolates it. No model, no network, sub-second.
+
+```bash
+python tools/detect_watermark.py -i examples/sceneB -o output/sceneB   # then look at the preview
+python inference.py -i examples/sceneB -o output/sceneB --stages wm,sfm,1 -n 3
+```
+
+Writes `watermark_mask.png` (255 = ignore) and `watermark_preview.png`. `--watermark_mask <png>`
+supplies one directly, skipping detection — that is the path for a hand-edited or reused mask.
+`--fill_boxes` masks each component's whole bounding box, sweeping up faint tagline strokes that sit
+below the threshold (sceneB: 5.5% → 7.9% coverage, residual leak 106 px → 55 px).
+
+**The photos are never modified and nothing is inpainted.** The mask is handed to the SfM stage,
+which excludes those pixels from matching, BA and triangulation, and zeroes their pointmap
+confidence so they never reach `points.ply` or `sparse/0`.
+
+Guards: `p99` of the persistence map below `--threshold` → reports "no watermark detected" and
+writes nothing (sceneA scores 24.7 against sceneB's 136, so a clean scene costs nothing); coverage
+above 25% → refuses, since that means the detection is wrong rather than the watermark huge.
+Fewer than 5 views → warns, because the discriminator needs the scene to actually change between
+views. GGPT backend only; `--sfm_backend mast3r` with a mask is an error rather than a silent no-op.
+
+> **On sceneB this stage is close to a no-op, and that is worth knowing.** Masking moved the solve
+> by ~1% (DLT tracks 15,021 → 14,333, epipolar discard 78.9% → 78.0%) because GGPT's epipolar
+> filter was *already* rejecting the watermark correspondences downstream. Masking removes them
+> earlier and keeps them out of BA track ranking, which is the more principled place to do it, but
+> it did not rescue this scene. sceneB's actual constraint is view count: at 9 views instead of 3
+> the same scene yields **596,294** DLT tracks against 14,333, with epipolar discard falling to
+> 48.8%. Reach for more views before reaching for this stage.
+
+### Stage 0 · SfM
 
 Recovers camera intrinsics, extrinsics and dense per-view pointmaps from **unposed** images.
 Writes `cameras.json` (OpenCV c2w), COLMAP `sparse/0`, `pointmaps/*.json` (dense per-view world XYZ
-+ confidence) and `points.ply` (fused, confidence-filtered). `inference.py` then converts the COLMAP
-model to `transforms.json`.
++ confidence), `points.ply` (fused, confidence-filtered) and `images/` — the frames every exported
+intrinsic refers to, which are *not* byte-identical to the inputs. `inference.py` then converts the
+COLMAP model to `transforms.json`.
 
-Configs: `configs/mast3r/unposed.yaml` (solve everything) and `posed.yaml` (fix intrinsics/extrinsics
-to a known calibration).
+Two backends produce that contract, selected with `--sfm_backend`. Everything downstream reads the
+contract and never the backend, so they are interchangeable.
+
+| | `ggpt` (default) | `mast3r` |
+|---|---|---|
+| geometry | VGGT dense pointmap → RoMaV2 dense matching → pycolmap BA → DLT re-triangulation | MASt3R-SfM sparse global alignment |
+| output dir | `<out>/ggpt_sfm/` | `<out>/mast3r_sfm/` |
+| pointmap grid | 518 wide, height rounded to a multiple of 14 (392×518 on a 4:3 photo) | half the image, exactly (384×512) |
+| `images/` | portrait input **transposed** to landscape; otherwise the original | centre-**cropped** to MASt3R's aspect |
+| known calibration | **not supported** — BA always re-solves extrinsics | `posed.yaml` fixes focal/pp/rotation/translation |
+| environment | separate (needs `romav2`) — see below | the RI3D environment |
+| configs | `configs/ggpt/unposed.yaml` | `configs/mast3r/{unposed,posed}.yaml` |
+
+Measured on `examples/sceneA` (3 views, 1024×768):
+
+| | cross-view depth agreement (p50) | stage-1a init cloud vs `points.ply` (p50, % of scene diagonal) |
+|---|---|---|
+| `mast3r` | 0.45% | 0.054% |
+| `ggpt` | **0.17%** | 0.050% |
+
+GGPT agrees better at the median with a heavier tail (p90 14.7% vs 10.0%), concentrated in
+low-confidence far field that the confidence gate already handles.
+
+**`--sfm_config posed` requires `--sfm_backend mast3r`.** GGPT's bundle adjustment always re-solves
+extrinsics — upstream `sfm/sfm_func.py` carries `TODO: support known camera poses`, and its
+`ba_config.calibrated` flag only substitutes known *intrinsics*. Asking for `posed` on the GGPT
+backend is a hard error rather than a silent re-solve.
+
+**Two environments.** RI3D's stage 5 and `mast3r/run_mast3r.py` need `open3d`; the GGPT stack needs
+`romav2`, and no single environment here carries both. The GGPT worker therefore runs
+out-of-process under `--ggpt_python` (default `/media/nguyen/conda/envs/ggpt/bin/python`) and writes
+`points.ply` with `plyfile` instead of open3d. It also strips the RI3D root from `sys.path` on
+startup: both projects ship a top-level `utils` package, RI3D's is a regular package and GGPT's is a
+namespace package, and a regular package wins wherever it sits on the path.
+
+`<out>/<backend>_sfm/ggpt_sfm_stats.json` records the solve: anchor reprojection error, per-view
+DLT coverage, the fitted depth scales and the confidence threshold used.
 
 > This stage is specific to this fork. Upstream RI3D assumes COLMAP poses already exist, which is
 > why the mip-NeRF 360 scenes ship their own `transforms.json` and `depth_rel/`.
@@ -56,7 +135,7 @@ to a known calibration).
 
 Produces the metric depth prior every later stage reads. Controlled by `--depth_source`:
 
-- **`pointmap`** (default) — resample MASt3R's dense pointmap depth onto the target grid.
+- **`pointmap`** (default) — resample the SfM backend's dense pointmap depth onto the target grid.
 - **`align`** — run Depth-Anything and fit its affine-invariant disparity onto the pointmap anchors.
 
 Writes `depth_rel/inpv2<name>_<N>.npy` and `inp_dust3r<name>_<N>.npy` (metric z-depth in SfM world
@@ -170,8 +249,9 @@ Two non-obvious edges:
 
 ### Point cloud through the stages
 
-Measured on sceneA (3 views, `--depth_source align`). Every stage after 1a is world-frame and applies
-no further transformation:
+Measured on sceneA (3 views, `--sfm_backend mast3r`, `--depth_source align`). Every stage after 1a
+is world-frame and applies no further transformation. Absolute values are gauge-dependent — a GGPT
+solve of the same scene lands at roughly a quarter of this scale:
 
 | stage | gaussians | centroid | p1–p99 extent |
 |---|---|---|---|
@@ -202,7 +282,16 @@ python inference.py -i data/mipnerf360/bicycle -o output/bicycle_3 \
     --sfm_config posed --num_views 3
 ```
 
-Selected stages — comma-separated; `1` expands to `1a,1b`, `2` to `2a,2b`, `5` to `5a,5b`:
+Same photos through the other SfM backend — the two land in different directories, so both solves
+can coexist for A/B comparison:
+
+```bash
+python inference.py -i /path/to/photos -o output/my_scene \
+    --sfm_backend mast3r --sfm_config unposed --stages sfm,1 -n 3
+```
+
+Selected stages — comma-separated; `1` expands to `1a,1b`, `2` to `2a,2b`, `5` to `5a,5b`. `wm` is
+opt-in and not part of `all`, since most scenes carry no watermark:
 
 ```bash
 python inference.py -i <scene> --stages sfm,1,2,3,5a,5b -n 3
@@ -240,21 +329,33 @@ Use `--stages sfm,1` rather than `--stages 1` for raw photos — `1` alone skips
 | `-r / --resolution` | 4 | downsample factor; must be consistent across all stages |
 | `--sh_degree` | 2 | spherical-harmonics degree |
 | `--depth_source` | `pointmap` | see [`point_map.md`](point_map.md) §4 |
-| `--sfm_config` | `posed` | `unposed` runs MASt3R-SfM |
+| `--sfm_config` | `posed` | `unposed` runs the SfM stage; `posed` requires `--sfm_backend mast3r` |
+| `--sfm_backend` | `ggpt` | `ggpt` = VGGT + RoMaV2; `mast3r` = MASt3R-SfM |
+| `--watermark_mask` | none | PNG mask of burned-in watermarks; skips stage `wm`. GGPT only |
+| `--fuse_mode` | `global_scale` | GGPT only; how VGGT depth is reconciled with the DLT anchors |
+| `--ggpt_refine` | off | GGPT only; additionally run the PTv3 point transformer |
+| `--ggpt_python` | `…/envs/ggpt/bin/python` | GGPT only; interpreter for the out-of-process worker |
 | `--prompt` | `xxy5syt00` | rare token for the Repair LoRA; must match across stages 3 and 5 |
 
 Required checkpoints live in `models/` (gitignored): SD 1.5, ControlNet Tile v1.1, SD2-inpainting —
-fetch with `python scripts/download_hf_models.py`. MASt3R weights are downloaded separately;
-`inference.py` warns about anything missing but continues.
+fetch with `python scripts/download_hf_models.py`. SfM weights are separate: MASt3R's are downloaded
+manually, VGGT-1B streams from the HuggingFace cache on first run, and `--ggpt_refine` additionally
+needs `GGPT/ckpts/model.step228000.pth`. `inference.py` warns about anything missing but continues.
 
 ---
 
 ## Gotchas
 
-**Re-running SfM invalidates the depth prior.** MASt3R's world gauge is arbitrary and a re-solve can
-return a different rotation, translation *and scale*. A re-solve may also drop views that fail to
-register, leaving `train_test_split_<N>.json` and `depth_rel/*_<N>.npy` inconsistent with the new
-solve. Regenerate depth after every SfM run.
+**Re-running SfM invalidates the depth prior.** Either backend's world gauge is arbitrary and a
+re-solve can return a different rotation, translation *and scale*. A re-solve may also drop views
+that fail to register, leaving `train_test_split_<N>.json` and `depth_rel/*_<N>.npy` inconsistent
+with the new solve. Regenerate depth after every SfM run.
+
+**Switching backends invalidates it too, and more sharply.** The two gauges are unrelated: on
+sceneA the MASt3R solve spans depths of 0.75–19.8 and the GGPT solve 0.01–1.36. `depth_rel/`,
+`depths<N>.npy` and `confs<N>.npy` all live inside the `<backend>_sfm/` directory, so they cannot be
+crossed by accident — but a `--depth_conf_thr` value tuned on one backend is meaningless on the
+other, because the confidence scales differ as well (see [`point_map.md`](point_map.md) §4).
 
 **`<scene>/point_cloud.ply` is not a world-frame model.** The dataset reader writes it as an
 intermediate on every `Scene()` construction and its points are in each view's camera frame. Point

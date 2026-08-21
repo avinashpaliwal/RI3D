@@ -18,7 +18,7 @@ from scene import GaussianModel
 from utils.arguments import PipelineParams, OptimizationParams
 from scene.cameras import Render_Camera
 from utils.sh_utils import SH2RGB
-from utils.loss_utils import l1_loss, l2_loss, ssim, monodisp
+from utils.loss_utils import l1_loss, l2_loss, ssim, monodisp, masked_l1_loss, masked_ssim
 from utils.graphics_utils import focal2fov, fov2focal
 from scene.gaussian_model import BasicPointCloud
 from plyfile import PlyData, PlyElement
@@ -342,11 +342,20 @@ class GaussianDreamer(BaseLift3DSystem):
         gt_image = viewpoint_cam.original_image.to(image.dtype).to(image.device)
         # if self.opt.random_background:
         #     gt_image = gt_image * viewpoint_cam.mask + bg[:, None, None] * (1 - viewpoint_cam.mask).squeeze()
-        Ll1 = torch.nan_to_num(l1_loss(image, gt_image))
-        loss = (1.0 - self.opt.lambda_dssim) * Ll1 + self.opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        loss_mask = getattr(viewpoint_cam, "loss_mask", None)
+        Ll1 = torch.nan_to_num(masked_l1_loss(image, gt_image, loss_mask))
+        loss = (1.0 - self.opt.lambda_dssim) * Ll1 + self.opt.lambda_dssim * (1.0 - masked_ssim(image, gt_image, loss_mask))
 
         self.lpips_loss = self.lpips_loss.to(image.device)
-        loss_lpips = torch.nan_to_num(self.lpips_loss(image[None], gt_image[None]))
+        # LPIPS has a deep receptive field, so there is no meaningful per-pixel
+        # mask for it. Copying the render into the ground truth over the ignored
+        # region makes the two identical there, which costs nothing and leaves no
+        # gradient, rather than pulling the render toward the watermark.
+        lp_image, lp_gt = image, gt_image
+        if loss_mask is not None:
+            keep = loss_mask.to(image.dtype).expand_as(image)
+            lp_gt = gt_image * keep + image.detach() * (1.0 - keep)
+        loss_lpips = torch.nan_to_num(self.lpips_loss(lp_image[None], lp_gt[None]))
         loss += loss_lpips * self.C(self.cfg.loss['lambda_lpips'])# * distance_weight
         # if silhouette_loss_type == "bce":
         #     silhouette_loss = torch.nan_to_num(F.binary_cross_entropy(render_pkg["rendered_alpha"][0], viewpoint_cam.mask))
@@ -423,6 +432,11 @@ class GaussianDreamer(BaseLift3DSystem):
                 batch['image'][id],
                 None,
                 batch['depth'][id],
+                # batch['mask'] is the photometric-loss mask from loo_mip
+                # (1 = supervise): it carries burned-in watermarks so they are not
+                # learned as scene content. Not gt_alpha_mask, which would blank
+                # the image there instead of leaving it unsupervised.
+                batch['mask'][id] if 'mask' in batch else None,
                 white_background = (self.bg_color == [1, 1, 1]),
                 data_device=self.gaussian.device,
                 distance=batch['distance'][id]

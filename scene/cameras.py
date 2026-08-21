@@ -16,7 +16,8 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getWorld2V
 
 class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask, mono_depth,
-                 image_name, uid, trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda", white_background=False, distance=None
+                 image_name, uid, trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda", white_background=False, distance=None,
+                 loss_mask=None
                  ):
         super(Camera, self).__init__()
 
@@ -45,6 +46,12 @@ class Camera(nn.Module):
             self.original_image[(self.mask <= 0.5).expand_as(self.original_image)] = 1.0 if white_background else 0.0
         else:
             self.mask = None
+
+        # Photometric-loss mask: 1 = supervise, 0 = ignore. Unlike `mask` above it
+        # never touches `original_image` -- the point is to leave those pixels
+        # unsupervised, not to replace them with a background colour the losses
+        # would then dutifully reproduce.
+        self.loss_mask = loss_mask.to(self.data_device) if loss_mask is not None else None
 
         if mono_depth is not None:
             # self.mono_depth = mono_depth.to(self.data_device) if mono_depth is not None else None
@@ -105,7 +112,7 @@ class MiniCam:
         self.camera_center = view_inv[3][:3]
 
 class Render_Camera(nn.Module):
-    def __init__(self, R, T, FoVx, FoVy, image, gt_alpha_mask=None, mono_depth=None,
+    def __init__(self, R, T, FoVx, FoVy, image, gt_alpha_mask=None, mono_depth=None, loss_mask=None,
                  trans=torch.tensor([0.0, 0.0, 0.0]), scale=1.0, data_device="cuda",
                  white_background=False, distance=None
                  ):
@@ -133,6 +140,15 @@ class Render_Camera(nn.Module):
             self.original_image[(self.mask <= 0.5).expand_as(self.original_image)] = 1.0 if white_background else 0.0
         else:
             self.mask = None
+
+        # Photometric-loss mask: 1 = supervise, 0 = ignore. Never touches
+        # original_image -- see the note in Camera above.
+        if loss_mask is not None:
+            self.loss_mask = loss_mask.to(self.data_device)
+            if self.loss_mask.dim() == 2:
+                self.loss_mask = self.loss_mask[None]
+        else:
+            self.loss_mask = None
 
         if mono_depth is not None:
             self.mono_depth = mono_depth.to(self.data_device)

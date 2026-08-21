@@ -37,6 +37,11 @@ class CameraInfo(NamedTuple):
     distance: Optional[float] = None
     mask: Optional[np.ndarray] = None
     mono_depth: Optional[np.ndarray] = None
+    # Photometric-loss mask: 1 = supervise, 0 = ignore. Deliberately separate from
+    # `mask` above, which carries alpha-matte semantics -- Camera.__init__ paints
+    # the image with the background wherever that one is low, which for a watermark
+    # would just train a white blob instead of leaving the region unsupervised.
+    loss_mask: Optional[np.ndarray] = None
 
 
 def loadCam(args, 
@@ -79,6 +84,16 @@ def loadCam(args,
     # else:
     loaded_mask = None
 
+    # Photometric-loss mask, resized to the training resolution. Nearest, and the
+    # threshold biases toward *ignoring*: a pixel only counts as supervised if it
+    # is fully outside the mask, so resampling never reintroduces watermark pixels.
+    loss_mask = None
+    if cam_info.loss_mask is not None:
+        lm = cv2.resize(
+            cam_info.loss_mask.astype(np.float32), resolution, interpolation=cv2.INTER_AREA
+        )
+        loss_mask = torch.from_numpy((lm >= 0.999).astype(np.float32)).unsqueeze(0)
+
     mono_depth = cam_info.mono_depth
     ### we load depth here for acceleration
     # mono_depth = None
@@ -92,8 +107,9 @@ def loadCam(args,
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask, mono_depth=mono_depth,
-                  image_name=cam_info.image_name, uid=id, 
-                  data_device=args.data_device, white_background=args.white_background, distance=cam_info.distance)
+                  image_name=cam_info.image_name, uid=id,
+                  data_device=args.data_device, white_background=args.white_background, distance=cam_info.distance,
+                  loss_mask=loss_mask)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args, mode="test"):
     camera_list = []

@@ -16,7 +16,7 @@ from tqdm import tqdm
 from torchmetrics.functional.regression import pearson_corrcoef
 
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, monodisp
+from utils.loss_utils import l1_loss, ssim, monodisp, masked_l1_loss, masked_ssim
 from utils.image_utils import psnr
 from gaussian_renderer import render
 from scene import Scene, GaussianModel
@@ -225,8 +225,11 @@ def cal_loss(opt, args, image, render_pkg, viewpoint_cam, bg, silhouette_loss_ty
     Optional: [silhouette loss, monodepth loss]
     """
     gt_image = viewpoint_cam.original_image.to(image.dtype).cuda()
-    Ll1 = l1_loss(image, gt_image)
-    loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+    # loss_mask is 1 = supervise, 0 = ignore; carries burned-in watermarks so they
+    # are not learned as scene content. See scene/dataset_readers_flow.py.
+    loss_mask = getattr(viewpoint_cam, "loss_mask", None)
+    Ll1 = masked_l1_loss(image, gt_image, loss_mask)
+    loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - masked_ssim(image, gt_image, loss_mask))
 
     # if hasattr(args, "use_mask") and args.use_mask:
     #     if silhouette_loss_type == "bce":

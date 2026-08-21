@@ -329,10 +329,64 @@ def readColmapSceneInfo(path, images, eval, llffhold=8, extra_opts=None, ply_ini
             + "\nRun the SfM/depth stage so depth aligned to the MASt3R pointmaps is written."
         )
 
+    def _find_watermark_mask(cam_info):
+        """Photometric-loss mask, if the SfM stage wrote one.
+
+        One mask per scene, at image resolution -- watermarks are composited at
+        fixed pixel coordinates, which is the assumption tools/detect_watermark.py
+        relies on. Returns a float array, 1 = supervise, 0 = ignore, or None.
+
+        Without this, a burned-in watermark is supervised as ground truth by L1 and
+        SSIM in every view, and since it sits at the same image coordinates in all
+        of them the Gaussians reproduce it as a consistent floating object.
+        """
+        img_dir = os.path.dirname(cam_info.image_path)
+        sfm_dir = os.path.dirname(img_dir)
+        candidates = [
+            os.path.join(sfm_dir, "masks", "watermark_mask.png"),
+            os.path.join(path, "masks", "watermark_mask.png"),
+            os.path.join(img_dir, "masks", "watermark_mask.png"),
+            os.path.join(path, "watermark_mask.png"),
+            # inference.py's `wm` stage writes here, one level above <backend>_sfm/
+            os.path.join(os.path.dirname(sfm_dir), "watermark_mask.png"),
+            os.path.join(os.path.dirname(path), "watermark_mask.png"),
+        ]
+        seen = set()
+        for c in candidates:
+            c = os.path.normpath(c)
+            if c in seen or not os.path.exists(c):
+                continue
+            seen.add(c)
+            m = cv2.imread(c, cv2.IMREAD_GRAYSCALE)
+            if m is None:
+                continue
+            # Compare against the *image on disk*, not cam_info.width/height --
+            # readMipTransforms stores those pre-divided by `resolution` (4096 for a
+            # 1024-wide photo) and the K build divides them back out. loadCam then
+            # resizes this mask alongside the image, so full image resolution is the
+            # right grid to hand it here.
+            img_w, img_h = cam_info.image.size
+            if (m.shape[0], m.shape[1]) != (img_h, img_w):
+                # Skip, do not abort: a stale pointmap-resolution mask sitting in
+                # masks/ must not shadow a correct full-resolution one later in the
+                # chain. Resizing it here is not an option either -- that would
+                # silently slide the mask off the watermark.
+                print(f"[!] {c} is {m.shape[1]}x{m.shape[0]} but images are "
+                      f"{img_w}x{img_h}; skipping it.")
+                continue
+            print(f"[i] Watermark loss mask: {c}")
+            return (m <= 127).astype(np.float32)
+        return None
+
+    watermark_mask = _find_watermark_mask(train_cam_infos[0]) if train_cam_infos else None
+    if watermark_mask is not None:
+        print(f"[i] Watermark loss mask: ignoring {(1 - watermark_mask).mean() * 100:.2f}% "
+              "of every training pixel (photometric losses only).")
+
     for idx, cam_info in enumerate(train_cam_infos):
         # depth_rel holds metric z-depth in SfM world units (see utils/depth_align.py).
         depth = torch.Tensor(_find_and_load_depth(cam_info, "inpv2"))[None, None]
-        train_cam_infos[idx] = cam_info._replace(mono_depth=depth[0])
+        train_cam_infos[idx] = cam_info._replace(mono_depth=depth[0], loss_mask=watermark_mask)
 
     if not extra_opts.is_renderrr:
         config = yaml.safe_load(open('configs/argument.yaml', 'r'))

@@ -26,7 +26,7 @@ from gaussian_renderer import network_gui, render
 from scene import GaussianModel, Scene
 from utils.general_utils import safe_state
 from utils.image_utils import psnr
-from utils.loss_utils import l1_loss, ssim, monodisp, l2_loss
+from utils.loss_utils import l1_loss, ssim, monodisp, l2_loss, masked_l1_loss, masked_ssim
 # from torch.utils.tensorboard.writer import SummaryWriter
 # TENSORBOARD_FOUND = True
 
@@ -245,8 +245,12 @@ def cal_loss(opt, args, image, render_pkg, viewpoint_cam, bg, silhouette_loss_ty
     gt_image = viewpoint_cam.original_image.to(image.dtype).cuda()
     # if opt.random_background:
     #     gt_image = gt_image * viewpoint_cam.mask + bg[:, None, None] * (1 - viewpoint_cam.mask).squeeze()
-    Ll1 = l1_loss(image, gt_image)
-    Lssim = (1.0 - ssim(image, gt_image))
+    # loss_mask is 1 = supervise, 0 = ignore. It carries burned-in watermarks, which
+    # would otherwise be supervised as ground truth in every view (and, sitting at
+    # fixed image coordinates, reconstructed as a consistent floating object).
+    loss_mask = getattr(viewpoint_cam, "loss_mask", None)
+    Ll1 = masked_l1_loss(image, gt_image, loss_mask)
+    Lssim = (1.0 - masked_ssim(image, gt_image, loss_mask))
     loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim
     if tb_writer is not None:
         tb_writer.add_scalar('loss/l1_loss', Ll1, iteration)

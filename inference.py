@@ -3,12 +3,16 @@
 RI3D End-to-End Sparse-View 3DGS Inference Pipeline
 ===================================================
 Reconstructs 3D Gaussian Splatting (3DGS) scenes from sparse RGB photos
-using MASt3R-SfM for camera pose & pointmap extraction, followed by the
-RI3D 5-stage Repair & Inpainting Diffusion Priors pipeline.
+using SfM for camera pose & pointmap extraction, followed by the RI3D
+5-stage Repair & Inpainting Diffusion Priors pipeline.
+
+Two SfM backends write the same contract (--sfm_backend):
+  ggpt    (default) VGGT dense pointmap -> RoMaV2 matching -> BA -> DLT
+  mast3r  MASt3R-SfM; the only one that can hold a known calibration fixed
 
 Usage Examples:
 ---------------
-1. Unposed sparse photos (extract poses & pointmaps via MASt3R-SfM -> 5-stage RI3D):
+1. Unposed sparse photos (extract poses & pointmaps, then run 5-stage RI3D):
    python inference.py -i /path/to/photos -o output/my_scene --sfm_config unposed --num_views 3
 
 2. Pre-calibrated scene (transforms.json already available):
@@ -103,10 +107,27 @@ def check_checkpoints(args):
     if not sd2_inp_dir.exists():
         missing.append(("SD2 Inpainting Model", sd2_inp_dir, "python scripts/download_hf_models.py"))
 
-    if args.sfm_config == "unposed":
+    if args.sfm_config == "unposed" and args.sfm_backend == "mast3r":
         mast3r_ckpt = Path("third_party/MASt3R/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth")
         if not mast3r_ckpt.exists() and not Path("/home/nguyen/projects/G4Splat/mast3r/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth").exists():
             missing.append(("MASt3R Checkpoint", mast3r_ckpt, "wget https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth -P ./third_party/MASt3R/checkpoints/"))
+
+    if args.sfm_config == "unposed" and args.sfm_backend == "ggpt":
+        ggpt_root = Path(args.ggpt_root)
+        if not ggpt_root.is_dir():
+            missing.append(("GGPT checkout", ggpt_root, "git clone --recursive https://github.com/chenyutongthu/GGPT.git"))
+        if not Path(args.ggpt_python).exists():
+            missing.append(("GGPT environment interpreter", Path(args.ggpt_python),
+                            "create the env from GGPT/requirements_sfm.txt, then pass --ggpt_python"))
+        # VGGT streams from the HF cache; a missing snapshot means a download,
+        # not a failure, so this is informational.
+        vggt_cache = Path.home() / ".cache/huggingface/hub/models--facebook--VGGT-1B"
+        if not vggt_cache.exists():
+            log_warn("VGGT-1B is not in the HF cache; the SfM stage will download it on first run.")
+        # Only the PTv3 refiner needs the GGPT weights.
+        if args.ggpt_refine and not (ggpt_root / "ckpts/model.step228000.pth").exists():
+            missing.append(("GGPT PTv3 checkpoint", ggpt_root / "ckpts/model.step228000.pth",
+                            "download from https://huggingface.co/YutongGoose/GGPT into GGPT/ckpts/"))
 
     if missing:
         log_warn("The following required checkpoint(s) were not found:")
@@ -268,26 +289,51 @@ def convert_colmap_to_transforms_json(sparse_dir, images_dir, output_transforms_
     return True
 
 
-def run_mast3r_sfm_and_extract_pointmap(source_path, output_scene_dir, num_views=3, dry_run=False):
+def run_sfm_and_extract_pointmap(source_path, output_scene_dir, args, dry_run=False):
     """
-    Run MASt3R-SfM to recover camera intrinsics, extrinsics, transforms.json,
-    and 3D pointmaps for unposed sparse images.
+    Recover camera intrinsics, extrinsics, transforms.json and dense pointmaps
+    from unposed sparse images.
+
+    Two interchangeable engines write the same output contract (`cameras.json`,
+    `sparse/0`, `pointmaps/*.json`, `points.ply`, `images/`), so everything
+    downstream is backend-agnostic:
+
+      ggpt    VGGT dense pointmap -> RoMaV2 dense matching -> pycolmap BA ->
+              DLT re-triangulation. Runs out-of-process in the GGPT
+              environment, which carries romav2.
+      mast3r  the original MASt3R-SfM.
+
+    Output lands in `<output_scene_dir>/<backend>_sfm/`, so switching backends
+    does not overwrite the other one's solve.
     """
-    log_success("Running MASt3R-SfM camera pose estimation & pointmap recovery...")
-    mast3r_out_dir = os.path.join(output_scene_dir, "mast3r_sfm")
-    os.makedirs(mast3r_out_dir, exist_ok=True)
+    backend = args.sfm_backend
+    label = "GGPT-SfM (VGGT + RoMaV2)" if backend == "ggpt" else "MASt3R-SfM"
+    log_success(f"Running {label} camera pose estimation & pointmap recovery...")
+
+    sfm_out_dir = os.path.join(output_scene_dir, f"{backend}_sfm")
+    os.makedirs(sfm_out_dir, exist_ok=True)
 
     local_sfm = "scripts/run_sfm.py"
     g4splat_sfm = "/home/nguyen/projects/G4Splat/scripts/run_sfm.py"
-    
+
     if os.path.exists(local_sfm):
-        cmd = f"python {local_sfm} --source_path {source_path} --output_path {mast3r_out_dir} --config unposed --n_images {num_views}"
+        cmd = (f"python {local_sfm} --backend {backend} --source_path {source_path} "
+               f"--output_path {sfm_out_dir} --config {args.sfm_config} --n_images {args.num_views}")
+        if backend == "ggpt":
+            cmd += (f" --ggpt_root {args.ggpt_root} --ggpt_python {args.ggpt_python}"
+                    f" --fuse_mode {args.fuse_mode}")
+            if args.ggpt_refine:
+                cmd += " --ggpt_refine"
+            if args.watermark_mask:
+                cmd += f" --watermark_mask {args.watermark_mask}"
         run_command(cmd, dry_run=dry_run)
-    elif os.path.exists(g4splat_sfm):
-        cmd = f"cd /home/nguyen/projects/G4Splat && python scripts/run_sfm.py --source_path {source_path} --output_path {mast3r_out_dir} --config unposed --n_images {num_views}"
+    elif backend == "mast3r" and os.path.exists(g4splat_sfm):
+        cmd = (f"cd /home/nguyen/projects/G4Splat && python scripts/run_sfm.py "
+               f"--source_path {source_path} --output_path {sfm_out_dir} "
+               f"--config {args.sfm_config} --n_images {args.num_views}")
         run_command(cmd, dry_run=dry_run)
     else:
-        log_warn("No MASt3R run_sfm.py found; checking local tools...")
+        log_warn("No run_sfm.py found; checking local tools...")
         sparse_pc_tool = "tools/sparse_pc.py"
         if os.path.exists(sparse_pc_tool):
             cmd = f"python {sparse_pc_tool} --source_path {source_path} --output_path {output_scene_dir}"
@@ -295,12 +341,12 @@ def run_mast3r_sfm_and_extract_pointmap(source_path, output_scene_dir, num_views
 
     # Convert resulting COLMAP sparse model to transforms.json
     if not dry_run:
-        sparse_0 = os.path.join(mast3r_out_dir, "sparse/0")
-        images_dir = os.path.join(mast3r_out_dir, "images")
-        tf_out = os.path.join(mast3r_out_dir, "transforms.json")
+        sparse_0 = os.path.join(sfm_out_dir, "sparse/0")
+        images_dir = os.path.join(sfm_out_dir, "images")
+        tf_out = os.path.join(sfm_out_dir, "transforms.json")
         convert_colmap_to_transforms_json(sparse_0, images_dir, tf_out)
 
-    return mast3r_out_dir
+    return sfm_out_dir
 
 
 def resolve_train_view_names(scene_path, num_views):
@@ -338,7 +384,7 @@ def resolve_train_view_names(scene_path, num_views):
 
 
 def _depth_from_pointmap(scene_path, name, K, width, height, c2w):
-    """Dense metric depth taken straight from the MASt3R pointmap.
+    """Dense metric depth taken straight from the SfM pointmap.
 
     The pointmap is already a dense depth image on its own grid, so resampling
     it to the target resolution keeps every value MASt3R produced. Projecting
@@ -462,7 +508,7 @@ def generate_aligned_depth(scene_path, image_dir, num_views, depth_source="point
     # up 1:1 with the per-view back-projected points in the reader.
     np.save(os.path.join(scene_path, f"depths{num_views}.npy"), np.stack(depths, axis=0))
     np.save(os.path.join(scene_path, f"confs{num_views}.npy"), np.stack(confs, axis=0))
-    log_success(f"Wrote metric depth + MASt3R confidence for {len(depths)} view(s)")
+    log_success(f"Wrote metric depth + per-view confidence for {len(depths)} view(s)")
     return True
 
 
@@ -496,7 +542,7 @@ def setup_ri3d_scene_data(scene_path, image_dir, image_files, num_views=3, resol
     if dry_run:
         return
 
-    # 2. Metric depth priors + per-view confidence, aligned to the MASt3R pointmaps.
+    # 2. Metric depth priors + per-view confidence, aligned to the SfM pointmaps.
     if generate_aligned_depth(scene_path, image_dir, num_views, depth_source=depth_source):
         return
 
@@ -519,7 +565,7 @@ def setup_ri3d_scene_data(scene_path, image_dir, image_files, num_views=3, resol
         )
     ]
     if missing:
-        log_error(f"No MASt3R pointmaps in {scene_path}/pointmaps and no depth_rel for: {', '.join(missing)}")
+        log_error(f"No SfM pointmaps in {scene_path}/pointmaps and no depth_rel for: {', '.join(missing)}")
         log_error("Run the SfM stage (--sfm_config unposed) so depth can be aligned to the pointmaps.")
         sys.exit(1)
 
@@ -546,7 +592,32 @@ def parse_args():
 
     # Pipeline & SfM Settings
     parser.add_argument("--sfm_config", type=str, default="posed", choices=["posed", "unposed"],
-                        help="'unposed' to run MASt3R-SfM pose/pointmap extraction, or 'posed' if transforms.json exists")
+                        help="'unposed' to run SfM pose/pointmap extraction, or 'posed' if transforms.json exists")
+    parser.add_argument("--sfm_backend", type=str, default="ggpt", choices=["ggpt", "mast3r"],
+                        help="Which SfM engine recovers poses and pointmaps. 'ggpt' runs VGGT + "
+                             "RoMaV2 + BA + DLT triangulation; 'mast3r' runs MASt3R-SfM. Both write "
+                             "the same contract, into <output>/<backend>_sfm/. Only 'mast3r' can "
+                             "hold a known calibration fixed, so --sfm_config posed requires it.")
+    parser.add_argument("--ggpt_root", type=str, default="/home/nguyen/projects/GGPT",
+                        help="Path to the GGPT checkout (--sfm_backend ggpt)")
+    parser.add_argument("--ggpt_python", type=str, default="/media/nguyen/conda/envs/ggpt/bin/python",
+                        help="Interpreter used for the GGPT SfM worker. GGPT needs romav2 and RI3D "
+                             "needs open3d; they live in separate environments, so the worker runs "
+                             "out-of-process.")
+    parser.add_argument("--fuse_mode", type=str, default="global_scale",
+                        choices=["global_scale", "per_view_scale", "per_view_affine"],
+                        help="How VGGT's dense depth is reconciled with the RoMaV2/DLT anchors. "
+                             "'global_scale' corrects only the bundle-adjustment gauge and preserves "
+                             "VGGT's multi-view consistency; 'per_view_affine' also removes each "
+                             "view's own depth bias. (--sfm_backend ggpt)")
+    parser.add_argument("--ggpt_refine", action="store_true",
+                        help="Additionally run GGPT's PTv3 point transformer over the fused pointmap "
+                             "(needs GGPT/ckpts/model.step228000.pth and the ptv3 extras).")
+    parser.add_argument("--watermark_mask", type=str, default=None,
+                        help="PNG mask (255 = ignore) of burned-in watermarks. Supplying one skips "
+                             "the 'wm' detection stage. Masked pixels are excluded from matching, "
+                             "bundle adjustment and triangulation; the photos are never modified. "
+                             "Requires --sfm_backend ggpt.")
     parser.add_argument("-n", "--num_views", "--sparse_num", dest="num_views", type=int, default=3,
                         help="Number of sparse training views (e.g. 3, 6, 9)")
     parser.add_argument("-r", "--resolution", type=int, default=4,
@@ -557,7 +628,7 @@ def parse_args():
                         help="Rare token / text prompt identifier for LoRA personalization")
     parser.add_argument("--depth_source", type=str, default="pointmap", choices=["pointmap", "align"],
                         help="Where the metric depth prior comes from. 'pointmap' resamples "
-                             "MASt3R's dense pointmap depth directly (metric and multi-view "
+                             "the SfM backend's dense pointmap depth directly (metric and multi-view "
                              "consistent by construction). 'align' instead runs Depth-Anything "
                              "and fits its disparity onto the pointmap anchors, keeping monocular "
                              "detail but introducing a depth-dependent bias in the far field.")
@@ -604,6 +675,8 @@ def main():
     print(f"  • Sparse Views:     {Colors.CYAN}{args.num_views}{Colors.ENDC}")
     print(f"  • Resolution Scale: 1/{Colors.CYAN}{args.resolution}{Colors.ENDC}")
     print(f"  • SfM Mode:         {Colors.CYAN}{args.sfm_config}{Colors.ENDC}")
+    print(f"  • SfM Backend:      {Colors.CYAN}{args.sfm_backend}{Colors.ENDC}"
+          + (f" ({args.fuse_mode}{', +ptv3' if args.ggpt_refine else ''})" if args.sfm_backend == "ggpt" else ""))
     print(f"  • Stages to Run:    {Colors.CYAN}{args.stages}{Colors.ENDC}")
     print(f"  • GPU Index:        {Colors.CYAN}cuda:{args.gpu}{Colors.ENDC}\n")
 
@@ -620,10 +693,13 @@ def main():
 
     start_time = time.time()
 
-    # Determine which stages to run
-    all_stages = ["sfm", "1a", "1b", "2a", "2b", "3", "4", "5a", "5b", "render"]
+    # Determine which stages to run.
+    # 'wm' is opt-in rather than part of 'all': most scenes carry no watermark,
+    # and the detector is only meaningful on a set of photos sharing one overlay.
+    all_stages = ["wm", "sfm", "1a", "1b", "2a", "2b", "3", "4", "5a", "5b", "render"]
     if args.stages.strip().lower() == "all":
         stages_to_run = set(all_stages)
+        stages_to_run.remove("wm")
         if args.sfm_config == "posed":
             stages_to_run.remove("sfm")
     else:
@@ -641,6 +717,25 @@ def main():
             else:
                 log_warn(f"Unrecognized stage name: '{s}'")
 
+    # GGPT's bundle adjustment always re-solves extrinsics (upstream
+    # sfm/sfm_func.py carries "TODO: support known camera poses"; ba_config's
+    # `calibrated` flag only substitutes known intrinsics). It therefore cannot
+    # honour a fixed calibration the way configs/mast3r/posed.yaml does, and
+    # running it anyway would silently discard the poses the user asked to keep.
+    # MASt3R-SfM has its own matching path with no mask plumbing, so a mask there
+    # would be silently ignored while the user believed watermarks were excluded.
+    if (args.watermark_mask or "wm" in stages_to_run) and args.sfm_backend == "mast3r":
+        log_error("Watermark masking is only supported by the ggpt backend; MASt3R-SfM has a "
+                  "separate matching path with no mask plumbing.")
+        sys.exit(1)
+
+    if "sfm" in stages_to_run and args.sfm_config == "posed" and args.sfm_backend == "ggpt":
+        log_error("--sfm_config posed is not supported by the ggpt backend: its bundle "
+                  "adjustment always re-solves camera extrinsics.")
+        log_error("Use --sfm_backend mast3r for pre-calibrated scenes, or --sfm_config unposed "
+                  "to accept a fresh solve.")
+        sys.exit(1)
+
     total_stages = len(stages_to_run)
     curr_stage_idx = 1
 
@@ -656,28 +751,63 @@ def main():
     final_stage2_ply = f"{output_inp_dir}/gaussian_object/{scene_name}_{args.num_views}/save/last.ply"
 
     # =========================================================================
-    # Stage 0: MASt3R-SfM Pose & Pointmap Extraction (if unposed)
+    # Stage 0: SfM Pose & Pointmap Extraction (if unposed)
     # =========================================================================
+    sfm_label = "GGPT-SfM (VGGT + RoMaV2)" if args.sfm_backend == "ggpt" else "MASt3R-SfM"
     effective_source_path = source_path
+
+    # =========================================================================
+    # Stage wm: watermark detection (opt-in, before SfM)
+    # =========================================================================
+    # Burned-in watermarks sit at identical pixel coordinates in every photo, so
+    # they match themselves at zero disparity and -- because run_sfm ranks BA
+    # tracks by SuperPoint saliency -- are preferentially promoted into the
+    # bundle adjustment. Detect them once here; the SfM stage excludes them.
+    if "wm" in stages_to_run:
+        log_banner(curr_stage_idx, total_stages, "Watermark Detection")
+        detected = os.path.join(args.output_dir, "watermark_mask.png")
+        cmd = (f"python tools/detect_watermark.py -i {source_path} "
+               f"--output_dir {args.output_dir}")
+        run_command(cmd, dry_run=args.dry_run)
+        if args.dry_run:
+            pass
+        elif os.path.exists(detected):
+            args.watermark_mask = detected
+            log_success(f"Watermark mask: {detected} (preview alongside it)")
+        else:
+            log_success("No watermark detected; SfM will use every pixel.")
+        curr_stage_idx += 1
+
     if "sfm" in stages_to_run:
-        log_banner(curr_stage_idx, total_stages, "MASt3R-SfM Camera Pose & Pointmap Extraction")
-        mast3r_out_dir = run_mast3r_sfm_and_extract_pointmap(source_path, args.output_dir, num_views=args.num_views, dry_run=args.dry_run)
-        effective_source_path = mast3r_out_dir
-        # Re-scan images from mast3r output images directory
+        log_banner(curr_stage_idx, total_stages, f"{sfm_label} Camera Pose & Pointmap Extraction")
+        sfm_out_dir = run_sfm_and_extract_pointmap(source_path, args.output_dir, args, dry_run=args.dry_run)
+        effective_source_path = sfm_out_dir
+        # Re-scan images from the SfM output images directory: those are the
+        # frames the exported intrinsics refer to (MASt3R centre-crops, GGPT
+        # transposes portrait input), not the originals.
         _, _, image_dir, image_files = validate_and_standardize_images(
             effective_source_path, auto_orient=False, dry_run=args.dry_run, num_views=args.num_views
         )
         curr_stage_idx += 1
     elif args.sfm_config == "unposed":
-        mast3r_dir = os.path.join(args.output_dir, "mast3r_sfm")
-        if os.path.isdir(mast3r_dir):
-            effective_source_path = mast3r_dir
+        # Reuse a previous solve. Prefer the selected backend's directory, but
+        # fall back to the other one so an existing scene stays usable after the
+        # default flipped to ggpt.
+        candidates = [os.path.join(args.output_dir, f"{args.sfm_backend}_sfm")]
+        candidates += [os.path.join(args.output_dir, f"{b}_sfm")
+                       for b in ("ggpt", "mast3r") if b != args.sfm_backend]
+        sfm_dir = next((d for d in candidates if os.path.isdir(d)), None)
+        if sfm_dir is not None:
+            if not sfm_dir.endswith(f"{args.sfm_backend}_sfm"):
+                log_warn(f"No {args.sfm_backend}_sfm/ solve found; reusing {os.path.basename(sfm_dir)}/ instead.")
+            effective_source_path = sfm_dir
             _, _, image_dir, image_files = validate_and_standardize_images(
                 effective_source_path, auto_orient=False, dry_run=args.dry_run, num_views=args.num_views
             )
         else:
-            log_error(f"Unposed scene '{source_path}' requires camera poses and pointmaps from SfM, but '{mast3r_dir}' was not found.")
-            log_error("Please include 'sfm' in --stages (e.g. '--stages sfm,1' or '--stages all') to run MASt3R-SfM first.")
+            log_error(f"Unposed scene '{source_path}' requires camera poses and pointmaps from SfM, "
+                      f"but none of {[os.path.basename(c) for c in candidates]} was found under {args.output_dir}.")
+            log_error(f"Please include 'sfm' in --stages (e.g. '--stages sfm,1' or '--stages all') to run {sfm_label} first.")
             sys.exit(1)
 
     # Prepare scene dataset structures & depth priors

@@ -153,6 +153,46 @@ class LooDataset(Dataset):
             + "\n  ".join(candidates)
         )
 
+    def _load_watermark_mask(self, cam_info, height, width):
+        """Photometric-loss mask written by the SfM stage, or None.
+
+        Same candidate chain as _load_depth. One mask per scene at image
+        resolution -- watermarks are composited at fixed pixel coordinates, which
+        is what makes a single mask valid for every view. Returns a (H, W) float
+        tensor, 1 = supervise, 0 = ignore.
+        """
+        img_dir = os.path.dirname(cam_info.image_path)
+        sfm_dir = os.path.dirname(img_dir)
+        candidates = [
+            os.path.join(d, "watermark_mask.png")
+            for d in (
+                os.path.join(sfm_dir, "masks"),
+                os.path.join(self.data_dir, "masks"),
+                os.path.join(img_dir, "masks"),
+                # inference.py's `wm` stage writes one level above <backend>_sfm/
+                os.path.dirname(sfm_dir),
+                os.path.dirname(self.data_dir),
+            )
+        ]
+        seen = set()
+        for c in candidates:
+            c = os.path.normpath(c)
+            if c in seen or not os.path.exists(c):
+                continue
+            seen.add(c)
+            m = cv2.imread(c, cv2.IMREAD_GRAYSCALE)
+            if m is None:
+                continue
+            if m.shape[:2] != (height, width):
+                # Skip, do not abort -- a stale pointmap-resolution mask must not
+                # shadow a correct full-resolution one later in the chain.
+                print(f"[!] {c} is {m.shape[1]}x{m.shape[0]} but images are {width}x{height}; "
+                      "skipping it.")
+                continue
+            print(f"[i] Watermark loss mask {c}: ignoring {(m > 127).mean() * 100:.2f}% of pixels")
+            return torch.from_numpy((m <= 127).astype(np.float32))
+        return None
+
     def __init__(self, cfg: LooDataModuleConfig, split: str = 'train', sparse_num: int = 0):
         super().__init__()
         self.cfg = cfg
@@ -257,9 +297,15 @@ class LooDataset(Dataset):
 
             # mask image
             image = (torch.from_numpy(np.array(cam_info.image))/255.).permute(2, 0, 1) # C, H, W
-            
+
+            # 1 = supervise, 0 = ignore. Was unconditionally torch.ones_like, which
+            # meant every consumer's `mask > 0.5` gate was always true -- so a
+            # burned-in watermark was supervised as scene content here too.
+            wm = self._load_watermark_mask(cam_info, image.shape[-2], image.shape[-1])
+            mask = torch.ones_like(image)[0].squeeze() if wm is None else wm
+
             self.images.append(image)
-            self.masks.append(torch.ones_like(image)[0].squeeze())
+            self.masks.append(mask)
             self.depths.append(depth_rel.squeeze())
             print(image.shape, "++++++++++++++++++++", cam_info.image_path)
 

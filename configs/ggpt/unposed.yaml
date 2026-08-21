@@ -1,0 +1,86 @@
+# GGPT-SfM for RI3D -- unposed sparse views.
+#
+# Consumed by ggpt_sfm/run_ggpt.py. The four *_config blocks are handed straight
+# to GGPT's sfm.sfm_func.run_sfm, so they follow GGPT's own schema; anything not
+# listed here is not read.
+#
+# Tuned for the sparse-view regime RI3D targets (typically 3 views). Compared to
+# GGPT's configs/demo.yaml the filters are *looser*, because with three widely
+# separated photos there is little redundancy: strict thresholds throw away the
+# tracks that constrain the far field and leave the dense pointmap with almost
+# no anchors to be rescaled onto. Tighten them for denser view sets.
+
+feedforward_config:
+  # vggt-depth unprojects VGGT's depth branch (sharper, better calibrated per
+  # view); vggt-point uses the world_points head directly.
+  model: vggt-depth
+  dav3:
+    input_pose: False
+  pi3x:
+    input_intrinsics: False
+    input_extrinsics: False
+
+match_config:
+  models: ['romav2-base']
+  # Matching resolution cap. Raising it costs memory quadratically in the
+  # number of pairs; it does not change the pointmap grid, which VGGT fixes
+  # at 518 wide.
+  max_width: 1280
+  save_vis: True          # writes matches_for_ba.png into the output dir
+
+ba_config:
+  score_thresh: 0.7
+  cycle_err_thresh: 2
+  mintrack_per_view: 2048
+  # True only if every photo came from the same camera at the same zoom.
+  shared_camera: True
+  refine_focal_length: True
+  calibrated: False
+  # PINHOLE, not SIMPLE_PINHOLE: VGGT runs on a 518-wide grid whose height is
+  # rounded to a multiple of 14, so the feed-forward image is a mildly
+  # anisotropic stretch of the photo and fx != fy on that grid.
+  camera_type: PINHOLE
+  loss_function_type: 'cauchy'
+  loss_function_scale: 0.1
+
+dlt_config:
+  score_thresh: 0.5
+  cycle_err_thresh: 3
+  max_epipolar_error: 4
+  # Three-view captures often have modest parallax; demanding 5 degrees can
+  # empty the anchor set entirely.
+  min_tri_angle: 2
+  max_reproj_error: 4
+  batch_size: 10000
+
+common_config:
+  seed: 47
+  num_workers: 0
+  save_vis: True
+  save_outputs: False
+  ggpt_ckpt: ckpts/model.step228000.pth   # relative to the GGPT checkout
+  reduce_memory: False
+  max_pts_num: 1000000
+  conf_quantile_thresh: 0.2
+
+# Only instantiated when --ggpt_refine is passed.
+ggptmodel_config:
+  _target_: ggpt.model.base.BasePredictor
+  grid_resolution: 384
+  type_embed_dim: 16
+  sinusoidal_dim: 32
+  zero_init: True
+  predict_residual: True
+  backbone_type: 'ptv3'
+  ptv3_config:
+    enc_dim: 128
+    output_dim: 96
+    turn_off_bn: False
+    stride:
+      - 2
+      - 2
+      - 2
+      - 2
+    enable_flash: True
+    embedding_type: 'MLP'
+  head_width: 256
